@@ -1,0 +1,250 @@
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { nanoid } from "nanoid";
+import User from "../User/models.js";
+import Otp from "./otp.model.js";
+
+const generateOtp = () =>
+  Math.floor(100000 + Math.random() * 900000).toString();
+
+const generateTokens = (user) => {
+  const accessToken = jwt.sign(
+    {
+      id: user._id,
+      customerId: user.customerId,
+      mobile: user.mobile,
+    },
+    process.env.JWT_SECRET,
+    {
+      expiresIn: process.env.ACCESS_TOKEN_EXPIRE || "15m",
+    }
+  );
+
+  const refreshToken = jwt.sign(
+    {
+      id: user._id,
+    },
+    process.env.JWT_REFRESH_SECRET,
+    {
+      expiresIn: process.env.REFRESH_TOKEN_EXPIRE || "30d",
+    }
+  );
+
+  return {
+    accessToken,
+    refreshToken,
+  };
+};
+
+/**
+ * SEND OTP
+ */
+export const sendOtpService = async ({ mobile }) => {
+  if (!mobile) {
+    throw new Error("Mobile number is required");
+  }
+
+  if (!/^[6-9]\d{9}$/.test(mobile)) {
+    throw new Error("Invalid mobile number");
+  }
+
+  const otp = generateOtp();
+
+  await Otp.deleteMany({ mobile });
+
+  await Otp.create({
+    mobile,
+    otp,
+    verified: false,
+    expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+  });
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("================================");
+    console.log("Mobile :", mobile);
+    console.log("OTP    :", otp);
+    console.log("================================");
+  }
+
+  return {
+    message: "OTP sent successfully",
+    ...(process.env.NODE_ENV === "development" && { otp }),
+  };
+};
+
+/**
+ * VERIFY OTP
+ */
+export const verifyOtpService = async ({ mobile, otp }) => {
+  if (!mobile || !otp) {
+    throw new Error("Mobile and OTP are required");
+  }
+
+  const otpDoc = await Otp.findOne({ mobile });
+
+  if (!otpDoc) {
+    throw new Error("OTP not found");
+  }
+
+  if (otpDoc.verified) {
+    throw new Error("OTP already used");
+  }
+
+  if (new Date() > otpDoc.expiresAt) {
+    await Otp.deleteOne({ _id: otpDoc._id });
+    throw new Error("OTP expired");
+  }
+
+  if (otpDoc.otp !== otp) {
+    throw new Error("Invalid OTP");
+  }
+
+  otpDoc.verified = true;
+  await otpDoc.save();
+
+  const user = await User.findOne({ mobile });
+
+  if (!user) {
+    return {
+      message: "OTP verified successfully",
+      isRegistered: false,
+    };
+  }
+
+  const { accessToken, refreshToken } =
+    generateTokens(user);
+
+  return {
+    message: "Login successful",
+    isRegistered: true,
+    user: {
+      customerId: user.customerId,
+      fullName: user.fullName,
+      mobile: user.mobile,
+      email: user.email,
+      mobileVerified: user.mobileVerified,
+    },
+    accessToken,
+    refreshToken,
+  };
+};
+
+/**
+ * REGISTER USER
+ */
+export const registerService = async ({
+  fullName,
+  mobile,
+  email,
+  mpin,
+}) => {
+  if (!fullName || !mobile || !mpin) {
+    throw new Error("Full name, mobile and MPIN are required");
+  }
+
+  const otpDoc = await Otp.findOne({
+    mobile,
+    verified: true,
+  });
+
+  if (!otpDoc) {
+    throw new Error("Please verify OTP first");
+  }
+
+  const mobileExists = await User.findOne({ mobile });
+  if (mobileExists) {
+    throw new Error("Mobile already registered");
+  }
+
+  if (email) {
+    const emailExists = await User.findOne({ email });
+    if (emailExists) {
+      throw new Error("Email already registered");
+    }
+  }
+
+  const hashedMpin = await bcrypt.hash(mpin, 10);
+
+  const customerId = `FS${Date.now()}${nanoid(4).toUpperCase()}`;
+
+  const user = await User.create({
+    customerId,
+    fullName,
+    mobile,
+    email,
+    mpin: hashedMpin, // 🔥 THIS WAS MISSING
+    mobileVerified: true,
+  });
+
+  await Otp.deleteMany({ mobile });
+
+  const { accessToken, refreshToken } = generateTokens(user);
+
+  return {
+    message: "User registered successfully",
+    data: {
+      customerId: user.customerId,
+      fullName: user.fullName,
+      mobile: user.mobile,
+      email: user.email,
+      mobileVerified: user.mobileVerified,
+    },
+    accessToken,
+    refreshToken,
+  };
+};
+
+
+export const loginService = async ({
+  mobile,
+  mpin,
+  deviceId,
+  deviceType,
+  fcmToken,
+}) => {
+  if (!mobile || !mpin) {
+    throw new Error("Mobile and MPIN are required");
+  }
+
+  const user = await User.findOne({ mobile });
+
+  if (!user) {
+    throw new Error("User not found");
+  }
+
+  // 🔐 MPIN verify
+  const isMatch = await bcrypt.compare(mpin, user.mpin);
+
+  if (!isMatch) {
+    throw new Error("Invalid MPIN");
+  }
+
+  // 📱 device tracking update
+  user.lastLoginDevice = deviceId || null;
+  user.deviceType = deviceType || null;
+  user.fcmToken = fcmToken || null;
+  user.lastLoginAt = new Date();
+
+  await user.save();
+
+  // 🔑 tokens generate
+  const { accessToken, refreshToken } =
+    generateTokens(user);
+
+  return {
+    message: "Login successful",
+    data: {
+      customerId: user.customerId,
+      fullName: user.fullName,
+      mobile: user.mobile,
+      email: user.email,
+      role: user.role,
+    },
+    accessToken,
+    refreshToken,
+  };
+};
+
+
+
+
