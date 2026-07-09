@@ -55,6 +55,27 @@ export const applyLoan = async (req, res) => {
     });
   }
 };
+export const uploadLoanDocument = async (req, res) => {
+    const { documentId } = req.body;
+
+    if (!req.file) {
+        return res.status(400).json({
+            success: false,
+            message: "File is required"
+        });
+    }
+
+    const result = await uploadToCloudinary(req.file.path);
+
+    return res.json({
+        success: true,
+        data: {
+            documentId,
+            file: result.secure_url,
+            publicId: result.public_id
+        }
+    });
+};
 
 export const getLoan = async (req, res) => {
   try {

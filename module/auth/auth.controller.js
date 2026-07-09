@@ -5,7 +5,7 @@ import {
   verifyOtpService,
   loginService,
 } from "../auth/auth.service.js";
-
+import Employee from "../User/Employee_Schema.js";
 /**
  * SEND OTP
  */
@@ -163,6 +163,101 @@ export const resetMpin = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: err.message || "Something went wrong",
+    });
+  }
+};
+
+
+export const employeeLogin = async (req, res) => {
+  try {
+    const { employeeId, password } = req.body;
+
+    if (!employeeId || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Employee ID and password are required",
+      });
+    }
+
+    // Find Employee
+    const employee = await Employee.findOne({
+      employeeId: employeeId.toUpperCase(),
+    }).select("+password");
+
+    if (!employee) {
+      return res.status(404).json({
+        success: false,
+        message: "Employee not found",
+      });
+    }
+
+    // Check Status
+    if (employee.status !== "ACTIVE") {
+      return res.status(403).json({
+        success: false,
+        message: "Employee account is inactive",
+      });
+    }
+
+    // Compare Password
+    const isMatch = await bcrypt.compare(password, employee.password);
+
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid Employee ID or Password",
+      });
+    }
+
+    // Update Last Login
+    employee.lastLogin = new Date();
+    await employee.save();
+
+    // Generate JWT
+    const accessToken = jwt.sign(
+      {
+        id: employee._id,
+        employeeId: employee.employeeId,
+        role: employee.role,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: process.env.JWT_EXPIRES_IN || "1d",
+      }
+    );
+
+    const refreshToken = jwt.sign(
+      {
+        id: employee._id,
+      },
+      process.env.JWT_REFRESH_SECRET,
+      {
+        expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Employee login successful",
+
+      data: {
+        id: employee._id,
+        employeeId: employee.employeeId,
+        fullName: employee.fullName,
+        role: employee.role,
+        designation: employee.designation,
+        department: employee.department,
+        branch: employee.branch,
+        profileImage: employee.profileImage,
+      },
+
+      accessToken,
+      refreshToken,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
     });
   }
 };

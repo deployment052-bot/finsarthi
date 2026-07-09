@@ -125,7 +125,7 @@ const loanApplicationSchema = new mongoose.Schema(
 
     assignedVisitor: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Employee",
       default: null,
       index: true,
     },

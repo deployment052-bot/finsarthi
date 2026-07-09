@@ -1,18 +1,15 @@
 import mongoose from "mongoose";
 import approvalService from "../loanApproval.model.js";
 import LoanApplication from "../loanApplication.model.js";
-import User from "../../User/user.route.js"
+import User from "../../User/user.route.js";
 import { applyManualLoan } from "../service.js/manualLoan.service.js";
 import { applyInstantLoan } from "../service.js/instantLoan.service.js";
-import {uploadToCloudinary} 
-from "../service.js/visitorVerification.service.js";
+import { uploadToCloudinary } from "../service.js/visitorVerification.service.js";
+import VisitorVerification from "../visitorverification.js";
 
 export const createApproval = async (req, res) => {
   try {
-    const approval = await approvalService.createApproval(
-      req.body,
-      req.user
-    );
+    const approval = await approvalService.createApproval(req.body, req.user);
 
     return res.status(201).json({
       success: true,
@@ -28,7 +25,6 @@ export const createApproval = async (req, res) => {
     });
   }
 };
-
 
 export const approveLoan = async (req, res) => {
   const session = await mongoose.startSession();
@@ -48,60 +44,100 @@ export const approveLoan = async (req, res) => {
 
     if (!approvedAmount || !approvedTenure || !interestRate) {
       await session.abortTransaction();
-      session.endSession();
 
       return res.status(400).json({
         success: false,
         message:
-          "approvedAmount, approvedTenure and interestRate are required",
+          "approvedAmount, approvedTenure and interestRate are required.",
       });
     }
 
-    const loan = await LoanApplication.findById(loanId).session(session);
+    // Get Loan
+    const loan = await LoanApplication.findById(loanId)
+      .populate("product")
+      .session(session);
 
     if (!loan) {
       await session.abortTransaction();
-      session.endSession();
 
       return res.status(404).json({
         success: false,
-        message: "Loan Application not found",
+        message: "Loan application not found.",
       });
     }
 
     if (loan.status !== "UNDER_REVIEW") {
       await session.abortTransaction();
-      session.endSession();
 
       return res.status(400).json({
         success: false,
-        message: "Loan is not under review",
+        message: "Loan is not under review.",
       });
     }
 
-    // Update LoanApplication
-    const updatedLoan = await LoanApplication.findByIdAndUpdate(
-      loanId,
-      {
-        $set: {
-          status: "APPROVED",
-          stage: "DISBURSEMENT",
-          approvedAmount,
-          interestRate,
-          tenure: approvedTenure,
-        },
-      },
-      {
-        new: true,
-        session,
-      }
-    );
+    /**
+     * ===================================
+     * MANUAL LOAN VALIDATION
+     * ===================================
+     */
+    if (loan.product.processingType === "MANUAL") {
+      const verification = await VisitorVerification.findOne({
+        loan: loan._id,
+      }).session(session);
 
-    // Approval History
+      if (!verification) {
+        await session.abortTransaction();
+
+        return res.status(404).json({
+          success: false,
+          message: "Visitor verification not found.",
+        });
+      }
+
+      if (verification.status !== "SUBMITTED") {
+        await session.abortTransaction();
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Visitor verification is not submitted or already reviewed.",
+        });
+      }
+
+      // Approve Visitor Verification
+      verification.status = "APPROVED";
+      verification.reviewedBy = req.user._id;
+      verification.reviewedAt = new Date();
+
+      if (remarks) {
+        verification.reviewRemarks = remarks;
+      }
+
+      await verification.save({ session });
+    }
+
+    /**
+     * ===================================
+     * APPROVE LOAN
+     * ===================================
+     */
+    loan.status = "APPROVED";
+    loan.stage = "DISBURSEMENT";
+    loan.approvedAmount = approvedAmount;
+    loan.tenure = approvedTenure;
+    loan.interestRate = interestRate;
+
+    await loan.save({ session });
+
+    /**
+     * ===================================
+     * APPROVAL HISTORY
+     * ===================================
+     */
     const approval = await approvalService.create(
       [
         {
-          loan: updatedLoan._id,
+          loan: loan._id,
           reviewer: req.user._id,
           approver: req.user._id,
           status: "APPROVED",
@@ -113,23 +149,25 @@ export const approveLoan = async (req, res) => {
           approvedAt: new Date(),
         },
       ],
-      { session }
+      { session },
     );
 
     await session.commitTransaction();
-    session.endSession();
 
     return res.status(200).json({
       success: true,
-      message: "Loan approved successfully.",
+      message: `${
+        loan.product.processingType === "MANUAL"
+          ? "Manual"
+          : "Instant"
+      } loan approved successfully.`,
       data: {
-        loan: updatedLoan,
+        loan,
         approval: approval[0],
       },
     });
   } catch (error) {
     await session.abortTransaction();
-    session.endSession();
 
     console.error("Approve Loan Error:", error);
 
@@ -137,6 +175,8 @@ export const approveLoan = async (req, res) => {
       success: false,
       message: error.message,
     });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -145,7 +185,7 @@ export const rejectLoan = async (req, res) => {
     const approval = await approvalService.rejectLoan(
       req.params.loanId,
       req.body,
-      req.user
+      req.user,
     );
 
     return res.status(200).json({
@@ -172,7 +212,7 @@ export const updateApproval = async (req, res) => {
     const approval = await approvalService.updateApproval(
       req.params.loanId,
       req.body,
-      req.user
+      req.user,
     );
 
     return res.status(200).json({
@@ -198,7 +238,7 @@ export const cancelApproval = async (req, res) => {
   try {
     const approval = await approvalService.cancelApproval(
       req.params.loanId,
-      req.user
+      req.user,
     );
 
     return res.status(200).json({
@@ -273,8 +313,7 @@ export const getPendingApprovals = async (req, res) => {
  */
 export const getApprovedLoans = async (req, res) => {
   try {
-    const approvals =
-      await approvalService.getApprovedLoans();
+    const approvals = await approvalService.getApprovedLoans();
 
     return res.status(200).json({
       success: true,
@@ -297,8 +336,7 @@ export const getApprovedLoans = async (req, res) => {
  */
 export const getRejectedLoans = async (req, res) => {
   try {
-    const approvals =
-      await approvalService.getRejectedLoans();
+    const approvals = await approvalService.getRejectedLoans();
 
     return res.status(200).json({
       success: true,
@@ -314,9 +352,6 @@ export const getRejectedLoans = async (req, res) => {
     });
   }
 };
-
-
-
 
 export const assignVisitor = async (req, res) => {
   const session = await mongoose.startSession();
@@ -361,17 +396,12 @@ export const assignVisitor = async (req, res) => {
     }
 
     // Only Submitted Loan
-    if (
-      !["SUBMITTED", "DOCUMENT_PENDING"].includes(
-        loan.status
-      )
-    ) {
+    if (!["SUBMITTED", "DOCUMENT_PENDING"].includes(loan.status)) {
       await session.abortTransaction();
 
       return res.status(400).json({
         success: false,
-        message:
-          "Visitor cannot be assigned at current loan status.",
+        message: "Visitor cannot be assigned at current loan status.",
       });
     }
 
@@ -386,9 +416,7 @@ export const assignVisitor = async (req, res) => {
     }
 
     // Get Visitor
-    const visitor = await User.findById(visitorId).session(
-      session
-    );
+    const visitor = await User.findById(visitorId).session(session);
 
     if (!visitor) {
       await session.abortTransaction();
@@ -426,35 +454,38 @@ export const assignVisitor = async (req, res) => {
     await loan.save({ session });
 
     // Create Verification Record
-await VisitorVerification.create([
-{
-    verificationId: `VV-${Date.now()}`,
-    loan: loan._id,
-    customer: loan.customer,
-    visitor: visitor._id,
+    await VisitorVerification.create(
+      [
+        {
+          verificationId: `VV-${Date.now()}`,
+          loan: loan._id,
+          customer: loan.customer,
+          visitor: visitor._id,
 
-    status: "ASSIGNED",
+          status: "ASSIGNED",
 
-    photos: [],
-    video: null,
-    documents: [],
+          photos: [],
+          video: null,
+          documents: [],
 
-    investigation: {},
-    location: {},
+          investigation: {},
+          location: {},
 
-    witness: {},
+          witness: {},
 
-    customerConsent: {},
+          customerConsent: {},
 
-    visitorDeclaration: {},
+          visitorDeclaration: {},
 
-    recommendation: null,
+          recommendation: null,
 
-    remarks: "",
+          remarks: "",
 
-    startedAt: null
-}
-],{session})
+          startedAt: null,
+        },
+      ],
+      { session },
+    );
 
     await session.commitTransaction();
 
@@ -484,9 +515,7 @@ export const getAllVisitors = async (req, res) => {
       isDeleted: false,
       isActive: true,
     })
-      .select(
-        "_id fullName employeeId mobile email profileImage"
-      )
+      .select("_id fullName employeeId mobile email profileImage")
       .sort({ fullName: 1 });
 
     return res.status(200).json({
@@ -508,55 +537,47 @@ export const getVisitorActivity = async (req, res) => {
   try {
     const visitorId = req.user._id;
 
-    const [
-      assigned,
-      inProgress,
-      submitted,
-      approved,
-      rejected,
-      today
-    ] = await Promise.all([
+    const [assigned, inProgress, submitted, approved, rejected, today] =
+      await Promise.all([
+        VisitorVerification.countDocuments({
+          visitor: visitorId,
+          status: "ASSIGNED",
+        }),
 
-      VisitorVerification.countDocuments({
-        visitor: visitorId,
-        status: "ASSIGNED"
-      }),
+        VisitorVerification.countDocuments({
+          visitor: visitorId,
+          status: "IN_PROGRESS",
+        }),
 
-      VisitorVerification.countDocuments({
-        visitor: visitorId,
-        status: "IN_PROGRESS"
-      }),
+        VisitorVerification.countDocuments({
+          visitor: visitorId,
+          status: "SUBMITTED",
+        }),
 
-      VisitorVerification.countDocuments({
-        visitor: visitorId,
-        status: "SUBMITTED"
-      }),
+        VisitorVerification.countDocuments({
+          visitor: visitorId,
+          status: "APPROVED",
+        }),
 
-      VisitorVerification.countDocuments({
-        visitor: visitorId,
-        status: "APPROVED"
-      }),
+        VisitorVerification.countDocuments({
+          visitor: visitorId,
+          status: "REJECTED",
+        }),
 
-      VisitorVerification.countDocuments({
-        visitor: visitorId,
-        status: "REJECTED"
-      }),
-
-      VisitorVerification.find({
-        visitor: visitorId
-      })
-      .populate({
-        path: "loan",
-        select: "applicationId amount status customer",
-        populate: {
-          path: "customer",
-          select: "fullName mobile"
-        }
-      })
-      .sort({ createdAt: -1 })
-      .limit(10)
-
-    ]);
+        VisitorVerification.find({
+          visitor: visitorId,
+        })
+          .populate({
+            path: "loan",
+            select: "applicationId amount status customer",
+            populate: {
+              path: "customer",
+              select: "fullName mobile",
+            },
+          })
+          .sort({ createdAt: -1 })
+          .limit(10),
+      ]);
 
     return res.status(200).json({
       success: true,
@@ -566,21 +587,18 @@ export const getVisitorActivity = async (req, res) => {
           inProgress,
           submitted,
           approved,
-          rejected
+          rejected,
         },
-        recentActivities: today
-      }
+        recentActivities: today,
+      },
     });
-
   } catch (error) {
-
     console.error(error);
 
     return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
-
   }
 };
 
@@ -669,11 +687,10 @@ export const submitVerification = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Verification submitted successfully. Waiting for admin approval.",
+      message:
+        "Verification submitted successfully. Waiting for admin approval.",
     });
-
   } catch (error) {
-
     await session.abortTransaction();
 
     console.error(error);
@@ -682,98 +699,70 @@ export const submitVerification = async (req, res) => {
       success: false,
       message: error.message,
     });
-
   } finally {
     session.endSession();
   }
 };
 
+export const saveInvestigation = async (req, res) => {
+  const { loanId } = req.params;
 
+  const verification = await VisitorVerification.findOne({
+    loan: loanId,
 
+    visitor: req.user._id,
+  });
 
-export const saveInvestigation = async(req,res)=>{
+  if (!verification) {
+    return res.status(404).json({
+      success: false,
 
-const {loanId}=req.params;
+      message: "Verification not found.",
+    });
+  }
 
-const verification=await VisitorVerification.findOne({
+  if (verification.status === "SUBMITTED") {
+    return res.status(400).json({
+      success: false,
 
-loan:loanId,
+      message: "Already submitted.",
+    });
+  }
 
-visitor:req.user._id
+  const {
+    investigation,
 
-});
+    location,
 
-if(!verification){
+    recommendation,
 
-return res.status(404).json({
+    remarks,
+  } = req.body;
 
-success:false,
+  if (investigation) verification.investigation = investigation;
 
-message:"Verification not found."
+  if (location) verification.location = location;
 
-});
+  if (recommendation) verification.recommendation = recommendation;
 
-}
+  if (remarks) verification.remarks = remarks;
 
-if(verification.status==="SUBMITTED"){
+  if (verification.status === "ASSIGNED") {
+    verification.status = "IN_PROGRESS";
 
-return res.status(400).json({
+    verification.startedAt = new Date();
+  }
 
-success:false,
+  await verification.save();
 
-message:"Already submitted."
+  return res.json({
+    success: true,
 
-});
+    message: "Investigation saved.",
 
-}
-
-const{
-
-investigation,
-
-location,
-
-recommendation,
-
-remarks
-
-}=req.body;
-
-
-if(investigation)
-verification.investigation=investigation;
-
-if(location)
-verification.location=location;
-
-if(recommendation)
-verification.recommendation=recommendation;
-
-if(remarks)
-verification.remarks=remarks;
-
-
-if(verification.status==="ASSIGNED"){
-
-verification.status="IN_PROGRESS";
-
-verification.startedAt=new Date();
-
-}
-
-await verification.save();
-
-return res.json({
-
-success:true,
-
-message:"Investigation saved.",
-
-data:verification
-
-});
-
-}
+    data: verification,
+  });
+};
 export const uploadPhoto = async (req, res) => {
   try {
     const { loanId } = req.params;
@@ -834,7 +823,7 @@ export const uploadPhoto = async (req, res) => {
     // Upload to Cloudinary
     const uploaded = await uploadToCloudinary(
       req.file.buffer,
-      `visitor-verification/${loanId}/photos`
+      `visitor-verification/${loanId}/photos`,
     );
 
     // Save photo metadata
@@ -892,14 +881,7 @@ export const saveWitness = async (req, res) => {
       });
     }
 
-    const {
-      fullName,
-      mobile,
-      relation,
-      idType,
-      idNumber,
-      agreed,
-    } = req.body;
+    const { fullName, mobile, relation, idType, idNumber, agreed } = req.body;
 
     if (fullName) verification.witness.fullName = fullName;
 
@@ -940,3 +922,193 @@ export const saveWitness = async (req, res) => {
     });
   }
 };
+
+
+
+
+
+// admin flow of manual verification 
+
+export const getVerificationDetails = async (req, res) => {
+  try {
+    const { loanId } = req.params;
+
+    const verification = await VisitorVerification.findOne({
+      loan: loanId,
+    })
+      .populate({
+        path: "loan",
+        populate: [
+          {
+            path: "customer",
+            select: "fullName mobile email",
+          },
+          {
+            path: "product",
+            select: "name processingType",
+          },
+        ],
+      })
+      .populate(
+        "visitor",
+        "fullName employeeId mobile email profileImage"
+      );
+
+    if (!verification) {
+      return res.status(404).json({
+        success: false,
+        message: "Verification not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: verification,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+//this is not use for now a day 
+
+// export const approveManualLoan = async (req, res) => {
+//   const session = await mongoose.startSession();
+
+//   try {
+//     session.startTransaction();
+
+//     const { loanId } = req.params;
+
+//     const {
+//       approvedAmount,
+//       approvedTenure,
+//       interestRate,
+//       processingFee = 0,
+//       remarks = "",
+//     } = req.body;
+
+//     if (!approvedAmount || !approvedTenure || !interestRate) {
+//       await session.abortTransaction();
+
+//       return res.status(400).json({
+//         success: false,
+//         message:
+//           "approvedAmount, approvedTenure and interestRate are required.",
+//       });
+//     }
+
+//     // Loan
+//     const loan = await LoanApplication.findById(loanId)
+//       .populate("product")
+//       .session(session);
+
+//     if (!loan) {
+//       await session.abortTransaction();
+
+//       return res.status(404).json({
+//         success: false,
+//         message: "Loan not found.",
+//       });
+//     }
+
+//     // Manual Loan Only
+//     if (loan.product.processingType !== "MANUAL") {
+//       await session.abortTransaction();
+
+//       return res.status(400).json({
+//         success: false,
+//         message: "This API is only for manual loans.",
+//       });
+//     }
+
+//     // Loan should be under review
+//     if (loan.status !== "UNDER_REVIEW") {
+//       await session.abortTransaction();
+
+//       return res.status(400).json({
+//         success: false,
+//         message: "Loan is not under review.",
+//       });
+//     }
+
+//     // Visitor Verification
+//     const verification = await VisitorVerification.findOne({
+//       loan: loan._id,
+//     }).session(session);
+
+//     if (!verification) {
+//       await session.abortTransaction();
+
+//       return res.status(404).json({
+//         success: false,
+//         message: "Visitor verification not found.",
+//       });
+//     }
+
+//     if (verification.status !== "APPROVED") {
+//       await session.abortTransaction();
+
+//       return res.status(400).json({
+//         success: false,
+//         message: "Visitor verification is not approved.",
+//       });
+//     }
+
+//     // Approve Loan
+//     loan.status = "APPROVED";
+//     loan.stage = "DISBURSEMENT";
+//     loan.approvedAmount = approvedAmount;
+//     loan.tenure = approvedTenure;
+//     loan.interestRate = interestRate;
+
+//     await loan.save({ session });
+
+//     // Approval History
+//     const approval = await approvalService.create(
+//       [
+//         {
+//           loan: loan._id,
+//           reviewer: req.user._id,
+//           approver: req.user._id,
+//           status: "APPROVED",
+//           approvedAmount,
+//           approvedTenure,
+//           interestRate,
+//           processingFee,
+//           remarks,
+//           approvedAt: new Date(),
+//         },
+//       ],
+//       { session }
+//     );
+
+//     await session.commitTransaction();
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Manual loan approved successfully.",
+//       data: {
+//         loan,
+//         approval: approval[0],
+//       },
+//     });
+//   } catch (error) {
+//     await session.abortTransaction();
+
+//     console.error(error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: error.message,
+//     });
+//   } finally {
+//     session.endSession();
+//   }
+// };

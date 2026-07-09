@@ -10,6 +10,7 @@ import {
   getPendingApprovals,
   getApprovedLoans,
   getRejectedLoans,
+  getVerificationDetails
 } from "./controller/loanApproval.controller.js";
 
 import {protect} from "../../middleware/authMiddleware.js";
@@ -105,6 +106,10 @@ router.get("/approved", protect, getApprovedLoans);
  */
 router.get("/rejected", protect, getRejectedLoans);
 
-
+router.get(
+  "/:loanId",
+  protect,
+  getVerificationDetails
+);
 
 export default router;

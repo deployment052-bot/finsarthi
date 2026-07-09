@@ -25,7 +25,7 @@ const visitorVerificationSchema = new mongoose.Schema(
 
     visitor: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      ref: "Employee",
       required: true,
       index: true,
     },
@@ -252,17 +252,39 @@ verificationScore:{
     type:Boolean,
     default:false
 },
+reviewedBy: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "User",
+},
+
+reviewedAt: Date,
 
       signature: String,
 
       declaredAt: Date,
     },
+    // Admin Review
+
+
+reviewRemarks: {
+  type: String,
+  trim: true,
+},
 
     rejectionReason: {
       code: String,
 
       message: String,
     },
+    rejectionReason: {
+  code: String,
+  message: String,
+  rejectedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+  rejectedAt: Date,
+},
 
     remarks: String,
 

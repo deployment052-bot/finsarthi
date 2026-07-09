@@ -42,12 +42,16 @@ const disbursementSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-
-    approvedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
+processedBy: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Employee",
+  default: null,
+},
+ processedBy: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Employee",
+  default: null,
+},
 
     approvedAt: {
       type: Date,
