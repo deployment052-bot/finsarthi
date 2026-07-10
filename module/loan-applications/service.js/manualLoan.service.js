@@ -65,7 +65,7 @@ export const applyManualLoan = async (req, res, product) => {
 
       purpose,
 
-      status: "UNDER_REVIEW",
+      status: "SUBMITTED",
 
       documents: documents.map((doc) => ({
         document: doc.documentId,

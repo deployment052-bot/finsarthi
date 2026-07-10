@@ -1,115 +1,151 @@
 import express from "express";
-import { applyLoan ,getLoan,getLoanById,downloadLoanStatement} from "./controller/loanApplication.controller.js";
+import { protect } from "../../middleware/authMiddleware.js";
+import { upload   } from "../../middleware/visitorupload.js";
+
+import {
+  applyLoan,
+  getLoan,
+  getLoanById,
+  downloadLoanStatement,
+} from "./controller/loanApplication.controller.js";
+
 import {
   createApproval,
   approveLoan,
   rejectLoan,
   updateApproval,
   cancelApproval,
-  // getApproval,
   getPendingApprovals,
   getApprovedLoans,
   getRejectedLoans,
-  getVerificationDetails
+  assignVisitor,
+  getAllVisitors,
+  getVisitorActivity,
+  submitVerification,
+  saveInvestigation,
+  uploadPhoto,
+  saveWitness,
+  getVerificationDetails,
+  getMyApplications,
+  getApplicationProgress
 } from "./controller/loanApproval.controller.js";
-
-import {protect} from "../../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.post(
-  "/apply",
-  protect,
-  applyLoan
-);
-router.get('/getmyloan',protect,getLoan)
-router.get("/:loanId", protect, getLoanById);
-router.get(
-  "/:loanId/statement",
-  protect,
-  downloadLoanStatement
-);
+
+// ======================================================
+// LOAN APPLICATION
+// ======================================================
+
+router.post("/apply", protect, applyLoan);
+
+router.get("/my-loans", protect, getLoan);
+
+router.get("/:loanId/statement", protect, downloadLoanStatement);
 
 
+// ======================================================
+// LOAN APPROVAL
+// ======================================================
 
+router.post("/approval", protect, createApproval);
 
-
-/**
- * =========================
- * CREATE APPROVAL
- * =========================
- * POST /loan-approval
- */
-router.post("/", protect, createApproval);
-
-/**
- * =========================
- * APPROVE LOAN
- * =========================
- * PATCH /loan-approval/:loanId/approve
- */
 router.patch("/:loanId/approve", protect, approveLoan);
 
-/**
- * =========================
- * REJECT LOAN
- * =========================
- * PATCH /loan-approval/:loanId/reject
- */
 router.patch("/:loanId/reject", protect, rejectLoan);
 
-/**
- * =========================
- * UPDATE APPROVAL
- * =========================
- * PATCH /loan-approval/:loanId
- */
 router.patch("/:loanId", protect, updateApproval);
 
-/**
- * =========================
- * CANCEL APPROVAL
- * =========================
- * PATCH /loan-approval/:loanId/cancel
- */
 router.patch("/:loanId/cancel", protect, cancelApproval);
 
-/**
- * =========================
- * GET SINGLE APPROVAL
- * =========================
- * GET /loan-approval/:loanId
- */
-// router.get("/:loanId", protect, getApproval);
 
-/**
- * =========================
- * GET PENDING APPROVALS
- * =========================
- * GET /loan-approval/pending
- */
-router.get("/pending", protect, getPendingApprovals);
+// ======================================================
+// APPROVAL LISTS
+// ======================================================
 
-/**
- * =========================
- * GET APPROVED LOANS
- * =========================
- * GET /loan-approval/approved
- */
-router.get("/approved", protect, getApprovedLoans);
+router.get("/approval/pending", protect, getPendingApprovals);
 
-/**
- * =========================
- * GET REJECTED LOANS
- * =========================
- * GET /loan-approval/rejected
- */
-router.get("/rejected", protect, getRejectedLoans);
+router.get("/approval/approved", protect, getApprovedLoans);
+
+router.get("/approval/rejected", protect, getRejectedLoans);
+
+
+// ======================================================
+// VISITOR MANAGEMENT
+// ======================================================
+
+router.get("/visitors", protect, getAllVisitors);
+
+router.post("/:loanId/assign-visitor", protect, assignVisitor);
+
+router.get("/visitor/activity", protect, getVisitorActivity);
+
+
+// ======================================================
+// VISITOR VERIFICATION
+// ======================================================
+
+router.patch(
+  "/:loanId/investigation",
+  protect,
+  saveInvestigation
+);
+
+router.post(
+  "/:loanId/upload-photo",
+  protect,
+  upload.single("photo"),
+  uploadPhoto
+);
+
+router.patch(
+  "/:loanId/witness",
+  protect,
+  upload.fields([
+    { name: "signature", maxCount: 1 },
+    { name: "selfie", maxCount: 1 },
+    { name: "idDocument", maxCount: 1 },
+  ]),
+  saveWitness
+);
+
+router.patch(
+  "/:loanId/submit-verification",
+  protect,
+  submitVerification
+);
+
+
+// ======================================================
+// ADMIN VERIFICATION
+// ======================================================
 
 router.get(
-  "/:loanId",
+  "/:loanId/verification",
   protect,
   getVerificationDetails
+);
+
+
+// ======================================================
+// LOAN DETAILS
+// ======================================================
+
+router.get("/:loanId/check", protect, getLoanById);
+router.get(
+  "/my-applications",
+  protect,
+ 
+  getMyApplications
+);
+
+
+// Single application ka progress + checklist
+router.get(
+  "/my-applications/:loanId",
+  protect,
+ 
+  getApplicationProgress
 );
 
 export default router;

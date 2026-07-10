@@ -6,6 +6,7 @@ import { applyManualLoan } from "../service.js/manualLoan.service.js";
 import { applyInstantLoan } from "../service.js/instantLoan.service.js";
 import { uploadToCloudinary } from "../service.js/visitorVerification.service.js";
 import VisitorVerification from "../visitorverification.js";
+import Employee  from "../../User/Employee_Schema.js";
 
 export const createApproval = async (req, res) => {
   try {
@@ -416,7 +417,7 @@ export const assignVisitor = async (req, res) => {
     }
 
     // Get Visitor
-    const visitor = await User.findById(visitorId).session(session);
+    const visitor = await Employee.findById(visitorId).session(session);
 
     if (!visitor) {
       await session.abortTransaction();
@@ -436,14 +437,14 @@ export const assignVisitor = async (req, res) => {
       });
     }
 
-    if (!visitor.isActive) {
-      await session.abortTransaction();
+ if (visitor.status !== "ACTIVE") {
+  await session.abortTransaction();
 
-      return res.status(400).json({
-        success: false,
-        message: "Visitor account is inactive.",
-      });
-    }
+  return res.status(400).json({
+    success: false,
+    message: "Visitor account is inactive.",
+  });
+}
 
     // Update Loan
     loan.assignedVisitor = visitor._id;
@@ -510,10 +511,9 @@ export const assignVisitor = async (req, res) => {
 
 export const getAllVisitors = async (req, res) => {
   try {
-    const visitors = await User.find({
+    const visitors = await Employee.find({
       role: "VISITOR",
-      isDeleted: false,
-      isActive: true,
+      status: "ACTIVE",
     })
       .select("_id fullName employeeId mobile email profileImage")
       .sort({ fullName: 1 });
@@ -532,7 +532,6 @@ export const getAllVisitors = async (req, res) => {
     });
   }
 };
-
 export const getVisitorActivity = async (req, res) => {
   try {
     const visitorId = req.user._id;
@@ -774,14 +773,17 @@ export const uploadPhoto = async (req, res) => {
         message: "Photo is required.",
       });
     }
-
+// console.log(req.body);
     const allowedCategories = [
-      "HOUSE",
-      "SHOP",
-      "OFFICE",
-      "CUSTOMER",
-      "DOCUMENT",
-      "OTHER",
+    "CUSTOMER",
+            "CUSTOMER_SELFIE",
+            "HOUSE_FRONT",
+            "HOUSE_INSIDE",
+            "SHOP",
+            "OFFICE",
+            "DOCUMENT",
+            "WITNESS",
+            "OTHER"
     ];
 
     if (!allowedCategories.includes(category)) {
@@ -790,6 +792,8 @@ export const uploadPhoto = async (req, res) => {
         message: "Invalid photo category.",
       });
     }
+//     console.log(req.file);
+// console.log(req.files);
 
     // Find verification of logged-in visitor
     const verification = await VisitorVerification.findOne({
@@ -881,7 +885,18 @@ export const saveWitness = async (req, res) => {
       });
     }
 
-    const { fullName, mobile, relation, idType, idNumber, agreed } = req.body;
+    const {
+      fullName,
+      mobile,
+      relation,
+      idType,
+      idNumber,
+      agreed,
+    } = req.body;
+
+    // =============================
+    // Save Witness Details
+    // =============================
 
     if (fullName) verification.witness.fullName = fullName;
 
@@ -893,13 +908,66 @@ export const saveWitness = async (req, res) => {
 
     if (idNumber) verification.witness.idNumber = idNumber;
 
-    if (typeof agreed === "boolean") {
-      verification.witness.agreed = agreed;
+    if (typeof agreed !== "undefined") {
+      verification.witness.agreed =
+        agreed === true || agreed === "true";
 
-      if (agreed) {
+      if (verification.witness.agreed) {
         verification.witness.signedAt = new Date();
       }
     }
+
+    // =============================
+    // Upload Witness Signature
+    // =============================
+
+    if (req.files?.signature?.length) {
+      const uploaded = await uploadToCloudinary(
+        req.files.signature[0].buffer,
+        `visitor-verification/${loanId}/witness-signature`
+      );
+
+      verification.witness.signature = {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+      };
+    }
+
+    // =============================
+    // Upload Witness Selfie
+    // =============================
+
+    if (req.files?.selfie?.length) {
+      const uploaded = await uploadToCloudinary(
+        req.files.selfie[0].buffer,
+        `visitor-verification/${loanId}/witness-selfie`
+      );
+
+      verification.witness.selfie = {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+      };
+    }
+
+    // =============================
+    // Upload Witness ID
+    // =============================
+
+    if (req.files?.idDocument?.length) {
+      const uploaded = await uploadToCloudinary(
+        req.files.idDocument[0].buffer,
+        `visitor-verification/${loanId}/witness-id`
+      );
+
+      verification.witness.idDocument = {
+        url: uploaded.secure_url,
+        publicId: uploaded.public_id,
+      };
+    }
+
+    // =============================
+    // Update Status
+    // =============================
 
     if (verification.status === "ASSIGNED") {
       verification.status = "IN_PROGRESS";
@@ -922,7 +990,6 @@ export const saveWitness = async (req, res) => {
     });
   }
 };
-
 
 
 
@@ -976,139 +1043,203 @@ export const getVerificationDetails = async (req, res) => {
 };
 
 
-//this is not use for now a day 
 
-// export const approveManualLoan = async (req, res) => {
-//   const session = await mongoose.startSession();
 
-//   try {
-//     session.startTransaction();
+// ✅ Yaha rakho
+const calculateProgress = (verification) => {
+  const checklist = [
+    !!verification.startedAt,
+    !!verification.location?.latitude,
+    !!verification.location?.longitude,
 
-//     const { loanId } = req.params;
+    verification.investigation?.customerAvailable,
+    verification.investigation?.customerVerified,
+    verification.investigation?.addressVerified,
+    verification.investigation?.employmentVerified,
+    verification.investigation?.businessVerified,
+    verification.investigation?.incomeVerified,
 
-//     const {
-//       approvedAmount,
-//       approvedTenure,
-//       interestRate,
-//       processingFee = 0,
-//       remarks = "",
-//     } = req.body;
+    verification.photos?.length > 0,
+    verification.documents?.length > 0,
 
-//     if (!approvedAmount || !approvedTenure || !interestRate) {
-//       await session.abortTransaction();
+    !!verification.customerConsent?.accepted,
 
-//       return res.status(400).json({
-//         success: false,
-//         message:
-//           "approvedAmount, approvedTenure and interestRate are required.",
-//       });
-//     }
+    !!verification.witness?.fullName,
+    !!verification.witness?.signature?.url,
 
-//     // Loan
-//     const loan = await LoanApplication.findById(loanId)
-//       .populate("product")
-//       .session(session);
+    !!verification.visitorDeclaration?.accepted,
 
-//     if (!loan) {
-//       await session.abortTransaction();
+    !!verification.submittedAt,
+  ];
 
-//       return res.status(404).json({
-//         success: false,
-//         message: "Loan not found.",
-//       });
-//     }
+  const completed = checklist.filter(Boolean).length;
 
-//     // Manual Loan Only
-//     if (loan.product.processingType !== "MANUAL") {
-//       await session.abortTransaction();
+  return Math.round((completed / checklist.length) * 100);
+};
 
-//       return res.status(400).json({
-//         success: false,
-//         message: "This API is only for manual loans.",
-//       });
-//     }
 
-//     // Loan should be under review
-//     if (loan.status !== "UNDER_REVIEW") {
-//       await session.abortTransaction();
+// ✅ Ye bhi yahi rakho
+const getChecklist = (verification) => {
+  return [
+    {
+      title: "Visit Started",
+      completed: !!verification.startedAt,
+    },
+    {
+      title: "GPS Captured",
+      completed: !!verification.location?.latitude,
+    },
+    {
+      title: "Customer Verified",
+      completed: !!verification.investigation?.customerVerified,
+    },
+    {
+      title: "Address Verified",
+      completed: !!verification.investigation?.addressVerified,
+    },
+    {
+      title: "Photos Uploaded",
+      completed: verification.photos?.length > 0,
+    },
+    {
+      title: "Documents Uploaded",
+      completed: verification.documents?.length > 0,
+    },
+    {
+      title: "Witness Added",
+      completed: !!verification.witness?.fullName,
+    },
+    {
+      title: "Customer Consent",
+      completed: !!verification.customerConsent?.accepted,
+    },
+    {
+      title: "Final Submitted",
+      completed: !!verification.submittedAt,
+    },
+  ];
+};
 
-//       return res.status(400).json({
-//         success: false,
-//         message: "Loan is not under review.",
-//       });
-//     }
 
-//     // Visitor Verification
-//     const verification = await VisitorVerification.findOne({
-//       loan: loan._id,
-//     }).session(session);
+// API Controllers niche
+export const getMyApplications = async (req, res) => {
+  try {
 
-//     if (!verification) {
-//       await session.abortTransaction();
+    const visitorId = req.user._id;
 
-//       return res.status(404).json({
-//         success: false,
-//         message: "Visitor verification not found.",
-//       });
-//     }
+    const loans = await LoanApplication.find({
+      assignedVisitor: visitorId,
+      isDeleted: false,
+    })
+      .populate("customer", "fullName mobile")
+      .populate("product", "displayName")
+      .sort({ createdAt: -1 });
 
-//     if (verification.status !== "APPROVED") {
-//       await session.abortTransaction();
 
-//       return res.status(400).json({
-//         success: false,
-//         message: "Visitor verification is not approved.",
-//       });
-//     }
+    const response = await Promise.all(
+      loans.map(async (loan) => {
 
-//     // Approve Loan
-//     loan.status = "APPROVED";
-//     loan.stage = "DISBURSEMENT";
-//     loan.approvedAmount = approvedAmount;
-//     loan.tenure = approvedTenure;
-//     loan.interestRate = interestRate;
+        const verification = await VisitorVerification.findOne({
+          loan: loan._id,
+        });
 
-//     await loan.save({ session });
 
-//     // Approval History
-//     const approval = await approvalService.create(
-//       [
-//         {
-//           loan: loan._id,
-//           reviewer: req.user._id,
-//           approver: req.user._id,
-//           status: "APPROVED",
-//           approvedAmount,
-//           approvedTenure,
-//           interestRate,
-//           processingFee,
-//           remarks,
-//           approvedAt: new Date(),
-//         },
-//       ],
-//       { session }
-//     );
+        let progress = 0;
 
-//     await session.commitTransaction();
+        if (verification) {
+          progress = calculateProgress(verification);
+        }
 
-//     return res.status(200).json({
-//       success: true,
-//       message: "Manual loan approved successfully.",
-//       data: {
-//         loan,
-//         approval: approval[0],
-//       },
-//     });
-//   } catch (error) {
-//     await session.abortTransaction();
 
-//     console.error(error);
+        return {
+          loanId: loan._id,
+          applicationId: loan.applicationId,
+          customer: loan.customer,
+          product: loan.product,
+          amount: loan.amount,
+          status: loan.status,
+          stage: loan.stage,
+          verificationStatus: verification?.status || "ASSIGNED",
+          progress,
+        };
 
-//     return res.status(500).json({
-//       success: false,
-//       message: error.message,
-//     });
-//   } finally {
-//     session.endSession();
-//   }
-// };
+      })
+    );
+
+
+    return res.json({
+      success:true,
+      data:response
+    });
+
+
+  } catch(err){
+
+    return res.status(500).json({
+      success:false,
+      message:err.message
+    });
+
+  }
+};
+
+
+
+export const getApplicationProgress = async (req, res) => {
+  try {
+    const { loanId } = req.params;
+
+    const verification = await VisitorVerification.findOne({
+      loan: loanId,
+      visitor: req.user._id, // Security: sirf assigned visitor hi dekh sake
+    })
+      .populate("customer", "fullName mobile")
+      .populate("loan");
+
+    if (!verification) {
+      return res.status(404).json({
+        success: false,
+        message: "Verification not found.",
+      });
+    }
+
+    const progress = calculateProgress(verification);
+
+    return res.status(200).json({
+      success: true,
+      message: "Verification details fetched successfully.",
+      data: {
+        loan: verification.loan,
+        customer: verification.customer,
+
+        status: verification.status,
+        progress,
+
+        investigation: verification.investigation,
+        location: verification.location,
+        recommendation: verification.recommendation,
+        remarks: verification.remarks,
+
+        photos: verification.photos,
+        videos: verification.videos,
+        documents: verification.documents,
+
+        witness: verification.witness,
+
+        customerConsent: verification.customerConsent,
+        visitorDeclaration: verification.visitorDeclaration,
+
+        startedAt: verification.startedAt,
+        submittedAt: verification.submittedAt,
+        completedAt: verification.completedAt,
+
+        checklist: getChecklist(verification),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
