@@ -4,63 +4,135 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Employee from "../../User/Employee_Schema.js";
 import PasswordReset from "../../User/OTP.js";
-
+import { createSession } from "../service/createSession.js";
 import { generateOTP } from "./util/generateOTP.js";
 import { sendEmail } from "./util/sendEmail.js";
 import { forgotPasswordTemplate } from "./util/emailTemplate.js";
 import Counteremp from "../../User/Counter.js";
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCK_TIME = 30 * 60 * 1000; // 30 Minutes
+
 export const adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. find admin (password manually include)
-    const admin = await Admin.findOne({ email }).select("+password");
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required.",
+      });
+    }
+
+    // ===========================
+    // Find Admin
+    // ===========================
+
+    const admin = await Admin.findOne({
+      email: email.trim().toLowerCase(),
+    }).select("+password");
 
     if (!admin) {
       return res.status(404).json({
         success: false,
-        message: "Admin not found",
+        message: "Admin not found.",
       });
     }
 
-    // 2. check status
+    // ===========================
+    // Status Check
+    // ===========================
+
     if (admin.status !== "ACTIVE") {
       return res.status(403).json({
         success: false,
-        message: "Admin blocked",
+        message: "Admin account is inactive.",
       });
     }
 
-    // 3. password verify
+    // ===========================
+    // Auto Unlock
+    // ===========================
+
+    if (
+      admin.loginLockedUntil &&
+      admin.loginLockedUntil <= new Date()
+    ) {
+      admin.loginAttempts = 0;
+      admin.loginLockedUntil = null;
+
+      await admin.save();
+    }
+
+    // ===========================
+    // Account Locked
+    // ===========================
+
+    if (
+      admin.loginLockedUntil &&
+      admin.loginLockedUntil > new Date()
+    ) {
+      return res.status(429).json({
+        success: false,
+        message:
+          "Your account has been temporarily locked due to multiple failed login attempts. Please try again after 30 minutes.",
+      });
+    }
+
+    // ===========================
+    // Verify Password
+    // ===========================
+
     const isMatch = await bcrypt.compare(password, admin.password);
 
     if (!isMatch) {
+      admin.loginAttempts += 1;
+
+      if (admin.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        admin.loginLockedUntil = new Date(
+          Date.now() + LOCK_TIME
+        );
+      }
+
+      await admin.save();
+
+      const remainingAttempts = Math.max(
+        0,
+        MAX_LOGIN_ATTEMPTS - admin.loginAttempts
+      );
+
       return res.status(401).json({
         success: false,
-        message: "Invalid credentials",
+        message:
+          remainingAttempts > 0
+            ? `Invalid credentials. ${remainingAttempts} login attempt(s) remaining.`
+            : "Account locked for 30 minutes due to multiple failed login attempts.",
       });
     }
 
-    // 4. update login time
+    // ===========================
+    // Successful Login
+    // ===========================
+
+    admin.loginAttempts = 0;
+    admin.loginLockedUntil = null;
     admin.lastLoginAt = new Date();
+
     await admin.save();
 
-    // 5. generate JWT
-    const token = jwt.sign(
-      {
-        id: admin._id,
-        role: admin.role,
-        permissions: admin.permissions,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: "1d" },
-    );
+    // ===========================
+    // Generate Tokens
+    // ===========================
+
+const { accessToken, refreshToken } = await createSession({
+  user: admin,
+  req,
+  userType: "Admin",
+});
 
     return res.status(200).json({
       success: true,
-      message: "Admin login successful",
-      token,
-      admin: {
+      message: "Admin login successful.",
+      data: {
         id: admin._id,
         adminId: admin.adminId,
         name: admin.name,
@@ -68,11 +140,15 @@ export const adminLogin = async (req, res) => {
         role: admin.role,
         permissions: admin.permissions,
       },
+      accessToken,
+      refreshToken,
     });
   } catch (err) {
+    console.error("Admin Login Error:", err);
+
     return res.status(500).json({
       success: false,
-      message: err.message,
+      message: "Something went wrong. Please try again later.",
     });
   }
 };
@@ -254,7 +330,7 @@ export const forgotPassword = async (req, res) => {
       userType = "EMPLOYEE";
     }
 
-    // Security: Same response even if email doesn't exist
+    // Same response for security
     if (!user) {
       return res.status(200).json({
         success: true,
@@ -263,7 +339,7 @@ export const forgotPassword = async (req, res) => {
       });
     }
 
-    // Delete old OTPs
+    // Remove previous OTP
     await PasswordReset.deleteMany({
       email: normalizedEmail,
     });
@@ -282,22 +358,28 @@ export const forgotPassword = async (req, res) => {
       otp: hashedOtp,
       verified: false,
       attempts: 0,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 min
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
 
-    // Send Email
-    await sendEmail({
-      to: normalizedEmail,
-      subject: "Reset Your FinSarthi Password",
-      html: forgotPasswordTemplate(
-        user.fullName || user.name || "User",
-        otp
-      ),
-    });
+    // Only send email in production
+    if (process.env.NODE_ENV === "production") {
+      await sendEmail({
+        to: normalizedEmail,
+        subject: "Reset Your FinSarthi Password",
+        html: forgotPasswordTemplate(
+          user.fullName || user.name || "User",
+          otp
+        ),
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: "OTP has been sent to your registered email.",
+      message:
+        process.env.NODE_ENV === "production"
+          ? "OTP has been sent to your registered email."
+          : "Development Mode: OTP generated successfully.",
+      ...(process.env.NODE_ENV !== "production" && { otp }), // only in development
     });
   } catch (error) {
     console.error("Forgot Password Error:", error);
@@ -413,7 +495,7 @@ export const resetPassword = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 8) {
+    if (newPassword.length < 4) {
       return res.status(400).json({
         success: false,
         message: "Password must be at least 8 characters.",
@@ -488,13 +570,20 @@ export const resetPassword = async (req, res) => {
     // Update Password
     // ==========================
 
-    user.password = await bcrypt.hash(newPassword, 10);
+// ==========================
+// Update Password
+// ==========================
 
-    if (otpRecord.userType === "EMPLOYEE") {
-      user.passwordChangedAt = new Date();
-    }
+user.password = await bcrypt.hash(newPassword, 10);
 
-    await user.save();
+// 🔐 Invalidate all existing tokens
+user.tokenVersion += 1;
+
+if (otpRecord.userType === "EMPLOYEE") {
+  user.passwordChangedAt = new Date();
+}
+
+await user.save();
 
     // ==========================
     // Delete OTP

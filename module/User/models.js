@@ -23,6 +23,19 @@ const userSchema = new mongoose.Schema(
       index: true,
       immutable: true,
     },
+    tokenVersion: {
+  type: Number,
+  default: 0,
+},
+loginAttempts: {
+    type: Number,
+    default: 0,
+},
+
+loginLockedUntil: {
+    type: Date,
+    default: null,
+},
 
     email: {
       type: String,

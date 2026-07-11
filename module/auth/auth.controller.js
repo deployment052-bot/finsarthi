@@ -7,6 +7,9 @@ import {
   loginService,
 } from "../auth/auth.service.js";
 import Employee from "../User/Employee_Schema.js";
+import { refreshTokenService } from "./service/refresh.service.js";
+
+import { createSession } from "./service/createSession.js";
 /**
  * SEND OTP
  */
@@ -82,7 +85,10 @@ export const register = async (req, res) => {
  */
 export const login = async (req, res) => {
   try {
-    const result = await loginService(req.body);
+    const result = await loginService({
+      ...req.body,
+      req,
+    });
 
     return res.status(200).json({
       success: true,
@@ -98,7 +104,6 @@ export const login = async (req, res) => {
     });
   }
 };
-
 
 
 export const sendForgotOtp = async (req, res) => {
@@ -169,6 +174,9 @@ export const resetMpin = async (req, res) => {
 };
 
 
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCK_TIME = 30 * 60 * 1000; // 30 Minutes
+
 export const employeeLogin = async (req, res) => {
   try {
     const { employeeId, password } = req.body;
@@ -200,47 +208,88 @@ export const employeeLogin = async (req, res) => {
       });
     }
 
-    // Compare Password
-    const isMatch = await bcrypt.compare(password, employee.password);
+    // ===========================
+    // Auto Unlock After Lock Time
+    // ===========================
 
-    if (!isMatch) {
-      return res.status(401).json({
+    if (
+      employee.loginLockedUntil &&
+      employee.loginLockedUntil <= new Date()
+    ) {
+      employee.loginAttempts = 0;
+      employee.loginLockedUntil = null;
+      await employee.save();
+    }
+
+    // ===========================
+    // Account Locked
+    // ===========================
+
+    if (
+      
+      employee.loginLockedUntil &&
+      employee.loginLockedUntil > new Date()
+    ) {
+      return res.status(429).json({
         success: false,
-        message: "Invalid Employee ID or Password",
+        message:
+          "Account is locked due to multiple failed login attempts. Please try again after 30 minutes.",
       });
     }
 
-    // Update Last Login
+    // ===========================
+    // Password Verify
+    // ===========================
+
+    const isMatch = await bcrypt.compare(password, employee.password);
+
+    if (!isMatch) {
+      employee.loginAttempts += 1;
+
+      if (employee.loginAttempts >= MAX_LOGIN_ATTEMPTS) {
+        employee.loginLockedUntil = new Date(Date.now() + LOCK_TIME);
+      }
+
+      await employee.save();
+
+      const remainingAttempts = Math.max(
+        0,
+        MAX_LOGIN_ATTEMPTS - employee.loginAttempts
+      );
+
+      return res.status(401).json({
+        success: false,
+        message:
+          remainingAttempts > 0
+            ? `Invalid Employee ID or Password. ${remainingAttempts} attempt(s) remaining.`
+            : "Account locked for 30 minutes due to multiple failed login attempts.",
+      });
+    }
+
+    // ===========================
+    // Reset Attempts
+    // ===========================
+
+    employee.loginAttempts = 0;
+    employee.loginLockedUntil = null;
     employee.lastLogin = new Date();
+
     await employee.save();
 
-    // Generate JWT
-    const accessToken = jwt.sign(
-      {
-        id: employee._id,
-        employeeId: employee.employeeId,
-        role: employee.role,
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: process.env.JWT_EXPIRES_IN || "1d",
-      }
-    );
+    // ===========================
+    // Generate Tokens
+    // ===========================
 
-    const refreshToken = jwt.sign(
-      {
-        id: employee._id,
-      },
-      process.env.JWT_REFRESH_SECRET,
-      {
-        expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
-      }
-    );
+  const { accessToken, refreshToken } =
+  await createSession({
+    user: employee,
+    req,
+    userType: "Employee", // Mongoose Model Name
+  });
 
     return res.status(200).json({
       success: true,
       message: "Employee login successful",
-
       data: {
         id: employee._id,
         employeeId: employee.employeeId,
@@ -251,12 +300,34 @@ export const employeeLogin = async (req, res) => {
         branch: employee.branch,
         profileImage: employee.profileImage,
       },
-
       accessToken,
       refreshToken,
     });
   } catch (err) {
     return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+
+
+export const refreshToken = async (req, res) => {
+  try {
+    const result = await refreshTokenService({
+      refreshToken: req.body.refreshToken,
+      req,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Token refreshed successfully",
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+  } catch (err) {
+    return res.status(401).json({
       success: false,
       message: err.message,
     });

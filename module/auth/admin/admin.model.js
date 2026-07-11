@@ -35,6 +35,10 @@ const adminSchema = new mongoose.Schema(
       type: String,
       default: "ADMIN",
     },
+    tokenVersion: {
+  type: Number,
+  default: 0,
+},
 
     permissions: {
       type: [String],

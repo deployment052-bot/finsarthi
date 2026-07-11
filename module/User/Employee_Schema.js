@@ -47,6 +47,15 @@ const employeeSchema = new mongoose.Schema(
         default: "",
       },
     },
+    loginAttempts: {
+    type: Number,
+    default: 0,
+},
+
+loginLockedUntil: {
+    type: Date,
+    default: null,
+},
 
     role: {
       type: String,
@@ -151,6 +160,10 @@ const employeeSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    tokenVersion: {
+  type: Number,
+  default: 0,
+},
 
     lockUntil: Date,
 

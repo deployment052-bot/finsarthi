@@ -75,7 +75,11 @@ export const sendOtpService = async ({ mobile }) => {
 /**
  * VERIFY OTP
  */
-export const verifyOtpService = async ({ mobile, otp }) => {
+export const verifyOtpService = async ({
+  mobile,
+  otp,
+  req,
+}) => {
   if (!mobile || !otp) {
     throw new Error("Mobile and OTP are required");
   }
@@ -137,6 +141,7 @@ export const registerService = async ({
   mobile,
   email,
   mpin,
+  req,
 }) => {
   if (!fullName || !mobile || !mpin) {
     throw new Error("Full name, mobile and MPIN are required");
@@ -178,7 +183,12 @@ export const registerService = async ({
 
   await Otp.deleteMany({ mobile });
 
-  const { accessToken, refreshToken } = generateTokens(user);
+const { accessToken, refreshToken } =
+  await createSession({
+    user,
+    req,
+    userType: "User",
+  });
 
   return {
     message: "User registered successfully",
@@ -201,6 +211,7 @@ export const loginService = async ({
   deviceId,
   deviceType,
   fcmToken,
+  req,
 }) => {
   if (!mobile || !mpin) {
     throw new Error("Mobile and MPIN are required");
@@ -228,9 +239,12 @@ export const loginService = async ({
   await user.save();
 
   // 🔑 tokens generate
-  const { accessToken, refreshToken } =
-    generateTokens(user);
-
+const { accessToken, refreshToken } =
+  await createSession({
+    user,
+    req,
+    userType: "User",
+  });
   return {
     message: "Login successful",
     data: {
