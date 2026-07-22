@@ -8,7 +8,10 @@ import {
 } from "../auth/auth.service.js";
 import Employee from "../User/Employee_Schema.js";
 import { refreshTokenService } from "./service/refresh.service.js";
+import RefreshToken from "./RefreshToken.js";
+import Admin from "./admin/admin.model.js";
 
+import User from "../User/models.js";
 import { createSession } from "./service/createSession.js";
 /**
  * SEND OTP
@@ -330,6 +333,154 @@ export const refreshToken = async (req, res) => {
     return res.status(401).json({
       success: false,
       message: err.message,
+    });
+  }
+};
+
+
+export const logout = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Refresh token is required.",
+      });
+    }
+
+    const tokenHash = hashToken(refreshToken);
+
+    await RefreshToken.findOneAndUpdate(
+      { tokenHash },
+      {
+        revoked: true,
+        used: true,
+        lastUsedAt: new Date(),
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged out successfully.",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+
+
+const EMPLOYEE_ROLES = [
+  "SUPER_ADMIN",
+  "MANAGER",
+  "VISITOR",
+  "CREDIT_ANALYST",
+  "DISBURSEMENT_OFFICER",
+  "COLLECTION_AGENT",
+  "CUSTOMER_SUPPORT",
+  "AUDITOR",
+];
+
+export const logoutAllDevices = async (req, res) => {
+  try {
+    let user;
+
+    if (req.role === "ADMIN") {
+      user = await Admin.findById(req.user._id);
+    } else if (EMPLOYEE_ROLES.includes(req.role)) {
+      user = await Employee.findById(req.user._id);
+    } else {
+      user = await User.findById(req.user._id);
+    }
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // Invalidate all access tokens
+    user.tokenVersion += 1;
+    await user.save();
+
+    // Revoke all refresh tokens
+    await RefreshToken.updateMany(
+      { user: user._id },
+      {
+        $set: {
+          revoked: true,
+          used: true,
+          lastUsedAt: new Date(),
+        },
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged out from all devices successfully.",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+
+
+export const getMySessions = async (req, res) => {
+  try {
+    const EMPLOYEE_ROLES = [
+      "SUPER_ADMIN",
+      "MANAGER",
+      "VISITOR",
+      "CREDIT_ANALYST",
+      "DISBURSEMENT_OFFICER",
+      "COLLECTION_AGENT",
+      "CUSTOMER_SUPPORT",
+      "AUDITOR",
+    ];
+
+    let userType = "User";
+
+    if (req.role === "ADMIN") {
+      userType = "Admin";
+    } else if (EMPLOYEE_ROLES.includes(req.role)) {
+      userType = "Employee";
+    }
+
+    console.log("========== SESSION DEBUG ==========");
+    console.log("User ID :", req.user._id);
+    console.log("Role :", req.role);
+    console.log("UserType :", userType);
+
+    const sessions = await RefreshToken.find({
+      user: req.user._id,
+      userType,
+      revoked: false,
+    })
+      .sort({ lastUsedAt: -1 })
+      .select(
+        "_id sessionId deviceName browser platform ip lastUsedAt createdAt revoked expiresAt deviceId"
+      );
+
+    return res.status(200).json({
+      success: true,
+      totalSessions: sessions.length,
+      sessions,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
     });
   }
 };

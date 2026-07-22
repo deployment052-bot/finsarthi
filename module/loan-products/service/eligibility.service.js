@@ -50,7 +50,7 @@ export const checkEligibility = async (user) => {
       },
     });
 
-  if (activeLoans >= 2) {
+  if (activeLoans >= 100) {
     return {
       eligible: false,
       reason: "MAX_ACTIVE_LOANS",

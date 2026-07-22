@@ -7,7 +7,7 @@ import { applyInstantLoan } from "../service.js/instantLoan.service.js";
 import { uploadToCloudinary } from "../service.js/visitorVerification.service.js";
 import VisitorVerification from "../visitorverification.js";
 import Employee  from "../../User/Employee_Schema.js";
-
+import { getVerificationProgress } from "../helper/visitorProgress.helper.js";
 export const createApproval = async (req, res) => {
   try {
     const approval = await approvalService.createApproval(req.body, req.user);
@@ -354,6 +354,15 @@ export const getRejectedLoans = async (req, res) => {
   }
 };
 
+
+
+const generateJobId = () => {
+  const year = new Date().getFullYear();
+  const timestamp = Date.now().toString().slice(-6);
+
+  return `JOB-${year}-${timestamp}`;
+};
+
 export const assignVisitor = async (req, res) => {
   const session = await mongoose.startSession();
 
@@ -445,6 +454,8 @@ export const assignVisitor = async (req, res) => {
     message: "Visitor account is inactive.",
   });
 }
+const jobId = generateJobId();
+const verificationId = `VV-${Date.now()}`;
 
     // Update Loan
     loan.assignedVisitor = visitor._id;
@@ -455,46 +466,62 @@ export const assignVisitor = async (req, res) => {
     await loan.save({ session });
 
     // Create Verification Record
-    await VisitorVerification.create(
-      [
-        {
-          verificationId: `VV-${Date.now()}`,
-          loan: loan._id,
-          customer: loan.customer,
-          visitor: visitor._id,
+  await VisitorVerification.create(
+  [
+    {
+      jobId,
+      verificationId,
 
-          status: "ASSIGNED",
+      loan: loan._id,
+      customer: loan.customer,
+      visitor: visitor._id,
 
-          photos: [],
-          video: null,
-          documents: [],
+      status: "ASSIGNED",
 
-          investigation: {},
-          location: {},
+      photos: [],
+      videos: [],
+      documents: [],
 
-          witness: {},
+      investigation: {},
 
-          customerConsent: {},
+      location: {},
 
-          visitorDeclaration: {},
+      witness: {},
 
-          recommendation: null,
+      customerConsent: {},
 
-          remarks: "",
+      visitorDeclaration: {},
 
-          startedAt: null,
-        },
-      ],
-      { session },
-    );
+      recommendation: null,
+
+      remarks: "",
+
+      startedAt: null,
+      submittedAt: null,
+      completedAt: null,
+    },
+  ],
+  {
+    session,
+  }
+);
 
     await session.commitTransaction();
 
-    return res.status(200).json({
-      success: true,
-      message: "Visitor assigned successfully.",
-      data: loan,
-    });
+return res.status(200).json({
+  success: true,
+  message: "Visitor assigned successfully.",
+  data: {
+    jobId,
+    verificationId,
+    loanId: loan._id,
+    applicationId: loan.applicationId,
+    visitorId: visitor._id,
+    visitorName: visitor.fullName,
+    status: "ASSIGNED",
+    assignedAt: loan.visitorAssignedAt,
+  },
+});
   } catch (error) {
     await session.abortTransaction();
 
@@ -1191,7 +1218,7 @@ export const getApplicationProgress = async (req, res) => {
 
     const verification = await VisitorVerification.findOne({
       loan: loanId,
-      visitor: req.user._id, // Security: sirf assigned visitor hi dekh sake
+      visitor: req.user._id,
     })
       .populate("customer", "fullName mobile")
       .populate("loan");
@@ -1203,43 +1230,339 @@ export const getApplicationProgress = async (req, res) => {
       });
     }
 
-    const progress = calculateProgress(verification);
+    // Production Resume Helper
+    const progress = getVerificationProgress(verification);
 
     return res.status(200).json({
       success: true,
       message: "Verification details fetched successfully.",
       data: {
+        // IDs
+        jobId: verification.jobId,
+        verificationId: verification.verificationId,
+
+        // Loan
         loan: verification.loan,
         customer: verification.customer,
 
+        // Status
         status: verification.status,
+
+        // Resume Information
         progress,
 
+        canResume: verification.status !== "SUBMITTED",
+        isCompleted: verification.status === "SUBMITTED",
+
+        // Investigation
         investigation: verification.investigation,
         location: verification.location,
         recommendation: verification.recommendation,
         remarks: verification.remarks,
 
+        // Media
         photos: verification.photos,
         videos: verification.videos,
         documents: verification.documents,
 
+        // Witness
         witness: verification.witness,
 
+        // Consent
         customerConsent: verification.customerConsent,
         visitorDeclaration: verification.visitorDeclaration,
 
+        // Timeline
         startedAt: verification.startedAt,
         submittedAt: verification.submittedAt,
         completedAt: verification.completedAt,
 
+        // Checklist
         checklist: getChecklist(verification),
       },
     });
   } catch (err) {
+    console.error("Get Application Progress Error:", err);
+
     return res.status(500).json({
       success: false,
       message: err.message,
+    });
+  }
+};
+
+export const getVisitorDashboard = async (req, res) => {
+  try {
+    const visitorId = req.user._id;
+
+    // ============================================
+    // Visitor Details
+    // ============================================
+
+    const visitor = await Employee.findById(visitorId).select(
+      "employeeId fullName mobile email profileImage role"
+    );
+
+    if (!visitor) {
+      return res.status(404).json({
+        success: false,
+        message: "Visitor not found",
+      });
+    }
+
+    // ============================================
+    // Date Calculations
+    // ============================================
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const currentWeekStart = new Date();
+    currentWeekStart.setDate(
+      currentWeekStart.getDate() - currentWeekStart.getDay()
+    );
+    currentWeekStart.setHours(0, 0, 0, 0);
+
+    const previousWeekStart = new Date(currentWeekStart);
+    previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+
+    // ============================================
+    // Dashboard Counts
+    // ============================================
+
+    const [
+      totalAssigned,
+      assigned,
+      inProgress,
+      submitted,
+      newAssignments,
+      highPriority,
+      currentWeekCompleted,
+      previousWeekCompleted,
+    ] = await Promise.all([
+      VisitorVerification.countDocuments({
+        visitor: visitorId,
+      }),
+
+      VisitorVerification.countDocuments({
+        visitor: visitorId,
+        status: "ASSIGNED",
+      }),
+
+      VisitorVerification.countDocuments({
+        visitor: visitorId,
+        status: "IN_PROGRESS",
+      }),
+
+      VisitorVerification.countDocuments({
+        visitor: visitorId,
+        status: "SUBMITTED",
+      }),
+
+      LoanApplication.countDocuments({
+        assignedVisitor: visitorId,
+        visitorAssignedAt: {
+          $gte: todayStart,
+        },
+        isDeleted: false,
+      }),
+
+      LoanApplication.countDocuments({
+        assignedVisitor: visitorId,
+        amount: {
+          $gte: 1000000,
+        },
+        isDeleted: false,
+      }),
+
+      VisitorVerification.countDocuments({
+        visitor: visitorId,
+        status: "SUBMITTED",
+        submittedAt: {
+          $gte: currentWeekStart,
+        },
+      }),
+
+      VisitorVerification.countDocuments({
+        visitor: visitorId,
+        status: "SUBMITTED",
+        submittedAt: {
+          $gte: previousWeekStart,
+          $lt: currentWeekStart,
+        },
+      }),
+    ]);
+
+    // ============================================
+    // Calculated Values
+    // ============================================
+
+    const pending = assigned + inProgress;
+
+    const completionRate =
+      totalAssigned === 0
+        ? 0
+        : Math.round((submitted / totalAssigned) * 100);
+
+    const visitGrowth =
+      previousWeekCompleted === 0
+        ? currentWeekCompleted > 0
+          ? 100
+          : 0
+        : Math.round(
+            ((currentWeekCompleted - previousWeekCompleted) /
+              previousWeekCompleted) *
+              100
+          );
+
+    // ============================================
+    // Assigned Loans
+    // (Part-2 me continue hoga...)
+    // ============================================
+
+    const loans = await LoanApplication.find({
+      assignedVisitor: visitorId,
+      isDeleted: false,
+    })
+      .populate("customer", "fullName mobile city state")
+      .populate("product", "displayName name")
+      .sort({ visitorAssignedAt: -1 });
+          // ============================================
+    // Visitor Verification Map
+    // ============================================
+
+    const loanIds = loans.map((loan) => loan._id);
+
+const verifications = await VisitorVerification.find({
+  loan: { $in: loanIds },
+  visitor: visitorId,
+}).select(
+  "jobId verificationId loan status investigation photos videos documents startedAt submittedAt"
+);
+
+    const verificationMap = new Map();
+
+    verifications.forEach((item) => {
+      verificationMap.set(item.loan.toString(), item);
+    });
+
+    // ============================================
+    // Today Jobs
+    // ============================================
+
+    const todayJobs = loans.map((loan) => {
+      const verification = verificationMap.get(loan._id.toString());
+
+      let progress = 0;
+
+      if (verification) {
+        progress = calculateProgress(verification);
+      }
+
+      let priority = "LOW";
+
+      if (loan.amount >= 1000000) {
+        priority = "HIGH";
+      } else if (loan.amount >= 300000) {
+        priority = "MEDIUM";
+      }
+
+      return {
+  jobId: verification?.jobId || null,
+
+  verificationId: verification?.verificationId || null,
+
+  loanId: loan._id,
+
+  applicationId: loan.applicationId,
+
+  customer: {
+    id: loan.customer?._id,
+    name: loan.customer?.fullName,
+    mobile: loan.customer?.mobile,
+    city: loan.customer?.city,
+    state: loan.customer?.state,
+  },
+
+  product: {
+    id: loan.product?._id,
+    name:
+      loan.product?.displayName ||
+      loan.product?.name,
+  },
+
+  amount: loan.amount,
+
+  status: loan.status,
+
+  verificationStatus:
+    verification?.status || "ASSIGNED",
+
+  progress,
+
+  priority,
+
+  assignedAt: loan.visitorAssignedAt,
+};
+    });
+
+    // ============================================
+    // Upcoming Tasks
+    // ============================================
+
+    const upcomingTasks = todayJobs.filter(
+      (job) => job.verificationStatus === "ASSIGNED"
+    );
+
+    // ============================================
+    // Notifications
+    // ============================================
+
+    const notifications = {
+      unread: newAssignments,
+    };
+
+    // ============================================
+    // Final Response
+    // ============================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Visitor dashboard fetched successfully.",
+
+      data: {
+        visitor,
+
+        summary: {
+          totalAssigned,
+          assigned,
+          inProgress,
+          submitted,
+          pending,
+
+          completionRate,
+
+          visitGrowth,
+
+          newAssignments,
+
+          highPriority,
+        },
+
+        todayJobs,
+
+        upcomingTasks,
+
+        notifications,
+      },
+    });
+  } catch (err) {
+    console.error("Visitor Dashboard Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch visitor dashboard.",
+      error: err.message,
     });
   }
 };

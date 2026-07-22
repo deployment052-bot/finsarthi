@@ -4,11 +4,13 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import Employee from "../../User/Employee_Schema.js";
 import PasswordReset from "../../User/OTP.js";
+import otpModel from "../otp.model.js";
 import { createSession } from "../service/createSession.js";
 import { generateOTP } from "./util/generateOTP.js";
 import { sendEmail } from "./util/sendEmail.js";
-import { forgotPasswordTemplate } from "./util/emailTemplate.js";
+import { sendLogoutOtpEmail } from "../admin/util/sendLogoutOtpEmail.js";
 import Counteremp from "../../User/Counter.js";
+// import { sendLogoutOtpEmail } from "./";
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_TIME = 30 * 60 * 1000; // 30 Minutes
 
@@ -366,7 +368,7 @@ export const forgotPassword = async (req, res) => {
       await sendEmail({
         to: normalizedEmail,
         subject: "Reset Your FinSarthi Password",
-        html: forgotPasswordTemplate(
+        html: sendLogoutOtpEmail(
           user.fullName || user.name || "User",
           otp
         ),
@@ -600,6 +602,150 @@ await user.save();
   } catch (error) {
     console.error("Reset Password Error:", error);
 
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+
+
+
+export const requestLogoutAllDevicesOtp = async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.user._id);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found.",
+      });
+    }
+
+    if (!admin.recoveryEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Recovery email is not configured.",
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Hash OTP
+    const hashedOtp = await bcrypt.hash(otp, 10);
+
+    // Delete previous LOGOUT_ALL OTPs
+    await Otp.deleteMany({
+      userId: admin._id,
+      purpose: "LOGOUT_ALL",
+    });
+
+    // Save OTP
+    await Otp.create({
+      email: admin.recoveryEmail,
+      userId: admin._id,
+      userType: "ADMIN",
+      purpose: "LOGOUT_ALL",
+      otp: hashedOtp,
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+    });
+
+    // ✅ Send OTP Email using SendGrid
+    await sendLogoutOtpEmail(
+      admin.recoveryEmail,
+      admin.name || "Admin",
+      otp
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP sent successfully to your recovery email.",
+    });
+  } catch (error) {
+    console.error("Logout OTP Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send OTP.",
+      error: error.message,
+    });
+  }
+};
+
+
+
+export const verifyLogoutAllDevicesOtp = async (req, res) => {
+  try {
+    const { otp } = req.body;
+
+    const admin = await Admin.findById(req.user._id);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found.",
+      });
+    }
+
+    const otpDoc = await Otp.findOne({
+      userId: admin._id,
+      purpose: "LOGOUT_ALL",
+    });
+
+    if (!otpDoc) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP not found.",
+      });
+    }
+
+    if (otpDoc.expiresAt < new Date()) {
+      await otpDoc.deleteOne();
+
+      return res.status(400).json({
+        success: false,
+        message: "OTP expired.",
+      });
+    }
+
+    const isValid = await bcrypt.compare(otp, otpDoc.otp);
+
+    if (!isValid) {
+      otpDoc.attempts += 1;
+      await otpDoc.save();
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP.",
+      });
+    }
+
+    admin.tokenVersion += 1;
+    await admin.save();
+
+    await RefreshToken.updateMany(
+      {
+        user: admin._id,
+      },
+      {
+        $set: {
+          revoked: true,
+          used: true,
+          lastUsedAt: new Date(),
+        },
+      }
+    );
+
+    await otpDoc.deleteOne();
+
+    return res.status(200).json({
+      success: true,
+      message: "Logged out from all devices successfully.",
+    });
+  } catch (error) {
     return res.status(500).json({
       success: false,
       message: error.message,

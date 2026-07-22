@@ -8,7 +8,7 @@ import {
   markAsRead,
   markAllAsRead,
   deleteNotification,
-  deleteAllNotifications,
+  deleteAllNotifications,testWhatsapp
 } from "./notification.controller.js";
 
 const router = express.Router();
@@ -63,6 +63,12 @@ router.delete(
   deleteNotification
 );
 
+
+router.post(
+    "/test-whatsapp",
+    protect,
+    testWhatsapp
+);
 /**
  * Delete All Notifications
  * DELETE /api/notifications

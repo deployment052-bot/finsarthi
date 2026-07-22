@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { nanoid } from "nanoid";
 import User from "../User/models.js";
 import Otp from "./otp.model.js";
-
+import { createSession } from "./service/createSession.js";
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 

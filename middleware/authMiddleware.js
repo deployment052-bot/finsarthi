@@ -43,6 +43,16 @@ export const protect = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    // JWT subject (sub)
+    const userId = decoded.sub || decoded.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid token payload",
+      });
+    }
+
     let user = null;
 
     // ===========================================
@@ -50,7 +60,7 @@ export const protect = async (req, res, next) => {
     // ===========================================
 
     if (decoded.role === "ADMIN") {
-      user = await Admin.findById(decoded.id).select("-password");
+      user = await Admin.findById(userId).select("-password");
     }
 
     // ===========================================
@@ -58,7 +68,7 @@ export const protect = async (req, res, next) => {
     // ===========================================
 
     else if (EMPLOYEE_ROLES.includes(decoded.role)) {
-      user = await Employee.findById(decoded.id).select("-password");
+      user = await Employee.findById(userId).select("-password");
     }
 
     // ===========================================
@@ -66,7 +76,7 @@ export const protect = async (req, res, next) => {
     // ===========================================
 
     else {
-      user = await User.findById(decoded.id).select("-mpin");
+      user = await User.findById(userId).select("-mpin");
     }
 
     // ===========================================
@@ -81,7 +91,21 @@ export const protect = async (req, res, next) => {
     }
 
     // ===========================================
-    // OPTIONAL STATUS CHECK FOR EMPLOYEES
+    // TOKEN VERSION CHECK (Logout From All Devices)
+    // ===========================================
+
+    if (
+      decoded.tokenVersion !== undefined &&
+      user.tokenVersion !== decoded.tokenVersion
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Session expired. Please login again.",
+      });
+    }
+
+    // ===========================================
+    // EMPLOYEE STATUS CHECK
     // ===========================================
 
     if (
@@ -100,10 +124,25 @@ export const protect = async (req, res, next) => {
 
     req.user = user;
     req.role = decoded.role;
+    req.token = decoded;
 
     next();
   } catch (error) {
     console.error("Auth Error:", error);
+
+    if (error.name === "TokenExpiredError") {
+      return res.status(401).json({
+        success: false,
+        message: "Access token expired",
+      });
+    }
+
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid access token",
+      });
+    }
 
     return res.status(401).json({
       success: false,

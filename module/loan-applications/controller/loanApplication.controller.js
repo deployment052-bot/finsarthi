@@ -8,6 +8,9 @@ import { decideLoan } from "../../loan-products/service/decision.service.js";
 import BankAccount from "../../bank-accounts/BankAccount.model.js";
 import { applyManualLoan } from "../service.js/manualLoan.service.js";
 import { applyInstantLoan } from "../service.js/instantLoan.service.js";
+import notificationService from "../../notification/service/notification.service.js";
+
+
 import {uploadToCloudinary} 
 from "../service.js/visitorVerification.service.js";
 const maskAccountNumber = (accountNumber = "") => {

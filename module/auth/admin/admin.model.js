@@ -39,6 +39,9 @@ const adminSchema = new mongoose.Schema(
   type: Number,
   default: 0,
 },
+recoveryEmail:{
+type: String,
+},
 
     permissions: {
       type: [String],

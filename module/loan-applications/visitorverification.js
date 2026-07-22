@@ -8,7 +8,12 @@ const visitorVerificationSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
-
+jobId: {
+  type: String,
+  required: true,
+  unique: true,
+  index: true,
+},
     loan: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "LoanApplication",

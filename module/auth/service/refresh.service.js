@@ -3,7 +3,7 @@ import Employee from "../../User/Employee_Schema.js";
 import User from "../../User/models.js";
 
 import RefreshToken from "../RefreshToken.js";
-
+import { createSession } from "./createSession.js";
 import { verifyRefreshToken } from "../utils/jwt.js";
 import { hashToken } from "../utils/hashToken.js";
 
@@ -27,6 +27,10 @@ export const refreshTokenService = async ({
     throw new Error("Invalid or expired refresh token.");
   }
 
+  console.log("\n========== JWT PAYLOAD ==========");
+  console.log(payload);
+  console.log("=================================\n");
+
   // ==========================================
   // Find Session
   // ==========================================
@@ -36,6 +40,10 @@ export const refreshTokenService = async ({
   const session = await RefreshToken.findOne({
     tokenHash,
   });
+
+  console.log("\n========== SESSION ==========");
+  console.log(session);
+  console.log("=============================\n");
 
   if (!session) {
     throw new Error("Session not found.");
@@ -68,24 +76,49 @@ export const refreshTokenService = async ({
   }
 
   // ==========================================
+  // Debug
+  // ==========================================
+
+  console.log("\n========== FIND USER ==========");
+  console.log("session.user      :", session.user);
+  console.log("session.userType  :", session.userType);
+  console.log("payload.sub       :", payload.sub);
+  console.log("payload.tokenVersion :", payload.tokenVersion);
+  console.log("===============================\n");
+
+  // ==========================================
   // Find User
   // ==========================================
 
-  let user = null;
+ let user = null;
 
-  switch (session.userType) {
-    case "ADMIN":
-      user = await Admin.findById(session.user);
-      break;
+const userType = String(session.userType).trim().toLowerCase();
 
-    case "EMPLOYEE":
-      user = await Employee.findById(session.user);
-      break;
+switch (userType) {
+  case "admin":
+    console.log("Searching Admin...");
+    user = await Admin.findById(session.user);
+    break;
 
-    default:
-      user = await User.findById(session.user);
-      break;
-  }
+  case "employee":
+    console.log("Searching Employee...");
+    user = await Employee.findById(session.user);
+    break;
+
+  case "user":
+    console.log("Searching User...");
+    user = await User.findById(session.user);
+    break;
+
+  default:
+    console.error("Invalid userType:", session.userType);
+    throw new Error(`Invalid userType: ${session.userType}`);
+}
+
+
+  console.log("\n========== USER ==========");
+  console.log(user);
+  console.log("==========================\n");
 
   if (!user) {
     throw new Error("User not found.");
@@ -95,6 +128,16 @@ export const refreshTokenService = async ({
   // Token Version Check
   // ==========================================
 
+  console.log(
+    "JWT Token Version :",
+    payload.tokenVersion
+  );
+
+  console.log(
+    "DB Token Version  :",
+    user.tokenVersion
+  );
+
   if (
     user.tokenVersion !== undefined &&
     payload.tokenVersion !== user.tokenVersion
@@ -103,49 +146,38 @@ export const refreshTokenService = async ({
   }
 
   // ==========================================
-  // Part-2
+  // Mark Current Refresh Token Used
   // ==========================================
+
+  session.used = true;
+  session.lastUsedAt = new Date();
+
+  await session.save();
+
   // ==========================================
-// Mark Current Refresh Token Used
-// ==========================================
+  // Create New Session
+  // ==========================================
 
-session.used = true;
-session.lastUsedAt = new Date();
+  const { accessToken, refreshToken: newRefreshToken } =
+    await createSession({
+      user,
+      req,
+      userType: session.userType,
+    });
 
-await session.save();
+  // ==========================================
+  // Revoke Old Session
+  // ==========================================
 
-// ==========================================
-// Create New Session (Rotation)
-// ==========================================
+  session.revoked = true;
+  await session.save();
 
-const { accessToken, refreshToken: newRefreshToken } =
-  await createSession({
-    user,
-    req,
-    userType: session.userType,
-  });
-
-// ==========================================
-// Optional Cleanup
-// ==========================================
-
-// Agar sirf ek active session per device rakhna hai,
-// to purana token revoke bhi kar sakte ho.
-
-session.revoked = true;
-await session.save();
-
-// ==========================================
-// Return
-// ==========================================
-
-return {
-  accessToken,
-  refreshToken: newRefreshToken,
-};
+  // ==========================================
+  // Return
+  // ==========================================
 
   return {
-    session,
-    user,
+    accessToken,
+    refreshToken: newRefreshToken,
   };
 };

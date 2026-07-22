@@ -70,30 +70,31 @@ const loanEMISchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Payment",
     },
+
     attemptCount: {
-  type: Number,
-  default: 1,
-},
+      type: Number,
+      default: 1,
+    },
 
-lastAttemptAt: {
-  type: Date,
-  default: Date.now,
-},
+    lastAttemptAt: {
+      type: Date,
+      default: Date.now,
+    },
 
-verifiedAmount: {
-  type: Number,
-  default: 0,
-},
+    verifiedAmount: {
+      type: Number,
+      default: 0,
+    },
 
-failureReason: {
-  type: String,
-  trim: true,
-},
+    failureReason: {
+      type: String,
+      trim: true,
+    },
 
-refundAmount: {
-  type: Number,
-  default: 0,
-},
+    refundAmount: {
+      type: Number,
+      default: 0,
+    },
 
     status: {
       type: String,
@@ -113,19 +114,60 @@ refundAmount: {
       type: Boolean,
       default: false,
     },
+
     overdueDays: {
-  type: Number,
-  default: 0,
-},
+      type: Number,
+      default: 0,
+    },
 
-lastPenaltyCalculatedAt: {
-  type: Date,
-},
+    lastPenaltyCalculatedAt: {
+      type: Date,
+    },
 
-penaltyStopped: {
-  type: Boolean,
-  default: false,
-},
+    penaltyStopped: {
+      type: Boolean,
+      default: false,
+    },
+
+    // ==========================================
+    // EMI Reminder Tracking
+    // ==========================================
+    remindersSent: {
+      twoDays: {
+        type: Boolean,
+        default: false,
+      },
+
+      oneDay: {
+        type: Boolean,
+        default: false,
+      },
+
+      dueToday: {
+        type: Boolean,
+        default: false,
+      },
+
+      overdueDay1: {
+        type: Boolean,
+        default: false,
+      },
+
+      overdueDay3: {
+        type: Boolean,
+        default: false,
+      },
+
+      overdueDay7: {
+        type: Boolean,
+        default: false,
+      },
+
+      overdueDay15: {
+        type: Boolean,
+        default: false,
+      },
+    },
 
     remarks: String,
 

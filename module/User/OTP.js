@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const passwordResetSchema = new mongoose.Schema(
+const otpSchema = new mongoose.Schema(
   {
     email: {
       type: String,
@@ -12,12 +12,26 @@ const passwordResetSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
+      index: true,
     },
 
     userType: {
       type: String,
-      enum: ["ADMIN", "EMPLOYEE"],
+      enum: ["ADMIN", "EMPLOYEE", "USER"],
       required: true,
+    },
+
+    purpose: {
+      type: String,
+      enum: [
+        "LOGIN",
+        "PASSWORD_RESET",
+        "EMAIL_VERIFICATION",
+        "LOGOUT_ALL",
+        "CHANGE_EMAIL",
+      ],
+      required: true,
+      index: true,
     },
 
     otp: {
@@ -45,12 +59,14 @@ const passwordResetSchema = new mongoose.Schema(
   }
 );
 
-passwordResetSchema.index(
+otpSchema.index(
   { expiresAt: 1 },
-  { expireAfterSeconds: 0 }
+  {
+    expireAfterSeconds: 0,
+  }
 );
 
-export default mongoose.model(
-  "PasswordReset",
-  passwordResetSchema
-);
+const Otp =
+  mongoose.models.Otp || mongoose.model("Otp", otpSchema);
+
+export default Otp;

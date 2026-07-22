@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 
 const employeeSchema = new mongoose.Schema(
   {
+    // =====================================
+    // BASIC INFO
+    // =====================================
+
     employeeId: {
       type: String,
       required: true,
@@ -31,12 +35,6 @@ const employeeSchema = new mongoose.Schema(
       index: true,
     },
 
-    password: {
-      type: String,
-      required: true,
-      select: false,
-    },
-
     profileImage: {
       url: {
         type: String,
@@ -47,15 +45,45 @@ const employeeSchema = new mongoose.Schema(
         default: "",
       },
     },
-    loginAttempts: {
-    type: Number,
-    default: 0,
-},
 
-loginLockedUntil: {
-    type: Date,
-    default: null,
-},
+    // =====================================
+    // AUTHENTICATION
+    // =====================================
+
+    password: {
+      type: String,
+      required: true,
+      select: false,
+    },
+
+    loginAttempts: {
+      type: Number,
+      default: 0,
+    },
+
+    lockUntil: {
+      type: Date,
+      default: null,
+    },
+
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
+
+    passwordChangedAt: {
+      type: Date,
+      default: null,
+    },
+
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+
+    // =====================================
+    // ROLE & DEPARTMENT
+    // =====================================
 
     role: {
       type: String,
@@ -63,6 +91,7 @@ loginLockedUntil: {
         "SUPER_ADMIN",
         "ADMIN",
         "MANAGER",
+        "RECOVERY_MANAGER",
         "VISITOR",
         "CREDIT_ANALYST",
         "DISBURSEMENT_OFFICER",
@@ -71,6 +100,7 @@ loginLockedUntil: {
         "AUDITOR",
       ],
       required: true,
+      index: true,
     },
 
     designation: {
@@ -89,7 +119,18 @@ loginLockedUntil: {
         "SUPPORT",
         "HR",
       ],
+      index: true,
     },
+
+    permissions: [
+      {
+        type: String,
+      },
+    ],
+
+    // =====================================
+    // EMPLOYMENT
+    // =====================================
 
     branch: {
       type: String,
@@ -100,14 +141,8 @@ loginLockedUntil: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
       default: null,
+      index: true,
     },
-
-    gender: {
-      type: String,
-      enum: ["MALE", "FEMALE", "OTHER"],
-    },
-
-    dateOfBirth: Date,
 
     joiningDate: {
       type: Date,
@@ -130,6 +165,20 @@ loginLockedUntil: {
         "RESIGNED",
       ],
       default: "ACTIVE",
+      index: true,
+    },
+
+    // =====================================
+    // PERSONAL INFO
+    // =====================================
+
+    gender: {
+      type: String,
+      enum: ["MALE", "FEMALE", "OTHER"],
+    },
+
+    dateOfBirth: {
+      type: Date,
     },
 
     address: {
@@ -146,26 +195,19 @@ loginLockedUntil: {
       mobile: String,
     },
 
-    permissions: [
+    // =====================================
+    // RECOVERY ASSIGNMENT (Optional)
+    // =====================================
+
+    assignedBranches: [
       {
         type: String,
       },
     ],
 
-    lastLogin: Date,
-
-    passwordChangedAt: Date,
-
-    loginAttempts: {
-      type: Number,
-      default: 0,
-    },
-    tokenVersion: {
-  type: Number,
-  default: 0,
-},
-
-    lockUntil: Date,
+    // =====================================
+    // AUDIT
+    // =====================================
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -176,12 +218,32 @@ loginLockedUntil: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Employee",
     },
+
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   {
     timestamps: true,
     versionKey: false,
   }
 );
+
+// =====================================
+// INDEXES
+// =====================================
+
+employeeSchema.index({ role: 1 });
+
+employeeSchema.index({ department: 1 });
+
+employeeSchema.index({ status: 1 });
+
+employeeSchema.index({ reportingManager: 1 });
+
+employeeSchema.index({ createdAt: -1 });
 
 const Employee = mongoose.model("Employee", employeeSchema);
 

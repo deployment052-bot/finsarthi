@@ -1,5 +1,5 @@
 import Notification from "./notification.model.js";
-
+  import notificationService from "./service/notification.service.js";
 /**
  * GET /notifications?page=1&limit=20&type=KYC
  */
@@ -259,5 +259,44 @@ export const deleteAllNotifications =
         message:
           "Failed to delete notifications",
       });
+    }
+  };
+
+
+
+
+
+  
+  export const testWhatsapp = async (req, res) => {
+    try {
+  
+      await notificationService.send({
+  
+        user: req.user._id,
+  
+        phone: "91XXXXXXXXXX", // apna WhatsApp number
+  
+        title: "Testing",
+  
+        message: "Hello Surjeet 🚀 Notification Engine Working",
+  
+        type: "GENERAL",
+  
+        sendWhatsapp: true
+  
+      });
+  
+      return res.json({
+        success: true,
+        message: "Notification Sent"
+      });
+  
+    } catch (err) {
+  
+      return res.status(500).json({
+        success: false,
+        message: err.message
+      });
+  
     }
   };

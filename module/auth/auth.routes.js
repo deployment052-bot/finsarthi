@@ -3,7 +3,7 @@ import {
   sendOtp,
   verifyOtp,
   register,
-  login,employeeLogin,refreshToken
+  login,employeeLogin,refreshToken,logout,logoutAllDevices,getMySessions
 } from "./auth.controller.js";
 import {adminLogin,registerEmployee,verifyForgotPasswordOtp,resetPassword,forgotPassword }from "./admin/admin.controller.js"
 import {protect} from "../../middleware/authMiddleware.js"
@@ -29,4 +29,12 @@ router.post(
 
 router.post("/refresh", refreshToken);
 router.post("/reset-password", resetPassword);
+
+
+
+
+router.post("/logout", protect, logout);
+
+router.post("/logout-all", protect, logoutAllDevices);
+router.get("/get-all-use-device", protect, getMySessions);
 export default router;

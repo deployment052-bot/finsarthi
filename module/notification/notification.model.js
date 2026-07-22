@@ -24,7 +24,13 @@ type: {
     "PROMOTION",
     "CREDIT_SCORE",
     "SECURITY",
-    "GENERAL"
+    "GENERAL",
+    "EMI_REMINDER",
+
+        "RECOVERY",
+    "PROMISE_REMINDER",
+    "FOLLOWUP_REMINDER",
+    "LEGAL_NOTICE",
   ],
   default: "GENERAL"
 },

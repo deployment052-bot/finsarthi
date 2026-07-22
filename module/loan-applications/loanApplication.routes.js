@@ -27,7 +27,7 @@ import {
   saveWitness,
   getVerificationDetails,
   getMyApplications,
-  getApplicationProgress
+  getApplicationProgress,getVisitorDashboard
 } from "./controller/loanApproval.controller.js";
 
 const router = express.Router();
@@ -146,6 +146,15 @@ router.get(
   protect,
  
   getApplicationProgress
+);
+
+
+
+
+router.get(
+  "/dashboard",
+protect,
+  getVisitorDashboard
 );
 
 export default router;
