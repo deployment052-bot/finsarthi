@@ -632,9 +632,15 @@ export const submitVerification = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    session.startTransaction();
+    await session.startTransaction();
 
     const { loanId } = req.params;
+
+    const {
+      informationCorrect,
+      photosGenuine,
+      investigationCompleted,
+    } = req.body;
 
     const verification = await VisitorVerification.findOne({
       loan: loanId,
@@ -659,7 +665,103 @@ export const submitVerification = async (req, res) => {
       });
     }
 
-    // Required validations
+    // ======================================================
+    // Investigation Validation
+    // ======================================================
+
+    const investigation = verification.investigation || {};
+
+    const investigationCompletedFlag =
+      investigation.customerAvailable ||
+      investigation.customerVerified ||
+      investigation.addressVerified ||
+      investigation.employmentVerified ||
+      investigation.businessVerified ||
+      investigation.incomeVerified ||
+      investigation.originalDocumentsVerified ||
+      investigation.photocopiesCollected ||
+      investigation.houseVisited ||
+      investigation.neighboursVerified;
+
+    if (!investigationCompletedFlag) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        success: false,
+        message: "Please complete investigation.",
+      });
+    }
+
+    // ======================================================
+    // Photo Validation
+    // ======================================================
+
+    const requiredPhotos = [
+      "CUSTOMER",
+      "CUSTOMER_SELFIE",
+      "HOUSE_FRONT",
+    ];
+
+    const uploadedPhotos = verification.photos.map(
+      (item) => item.category
+    );
+
+    const missingPhotos = requiredPhotos.filter(
+      (item) => !uploadedPhotos.includes(item)
+    );
+
+    if (missingPhotos.length) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        success: false,
+        message: `Missing required photos: ${missingPhotos.join(", ")}`,
+      });
+    }
+
+    // ======================================================
+    // Document Validation
+    // ======================================================
+
+    const requiredDocuments = [
+      "AADHAAR",
+      "PAN",
+    ];
+
+    const uploadedDocuments = verification.documents.map(
+      (item) => item.type
+    );
+
+    const missingDocuments = requiredDocuments.filter(
+      (item) => !uploadedDocuments.includes(item)
+    );
+
+    if (missingDocuments.length) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        success: false,
+        message: `Missing required documents: ${missingDocuments.join(", ")}`,
+      });
+    }
+
+    // ======================================================
+    // Witness Validation
+    // ======================================================
+
+    if (!verification.witness?.agreed) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        success: false,
+        message: "Witness verification is required.",
+      });
+    }
+
+    // ======================================================
+    // Customer Consent
+    // ======================================================
+
     if (!verification.customerConsent?.accepted) {
       await session.abortTransaction();
 
@@ -669,14 +771,9 @@ export const submitVerification = async (req, res) => {
       });
     }
 
-    if (!verification.witness?.agreed) {
-      await session.abortTransaction();
-
-      return res.status(400).json({
-        success: false,
-        message: "Witness approval is required.",
-      });
-    }
+    // ======================================================
+    // Recommendation
+    // ======================================================
 
     if (!verification.recommendation) {
       await session.abortTransaction();
@@ -686,6 +783,35 @@ export const submitVerification = async (req, res) => {
         message: "Recommendation is required.",
       });
     }
+
+    // ======================================================
+    // Final Declaration Validation
+    // ======================================================
+
+    if (
+      !informationCorrect ||
+      !photosGenuine ||
+      !investigationCompleted
+    ) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please accept all declaration checkboxes before submitting.",
+      });
+    }
+
+    verification.finalDeclaration = {
+      informationCorrect,
+      photosGenuine,
+      investigationCompleted,
+      acceptedAt: new Date(),
+    };
+
+    // ======================================================
+    // Loan Validation
+    // ======================================================
 
     const loan = await LoanApplication.findById(loanId).session(session);
 
@@ -697,6 +823,10 @@ export const submitVerification = async (req, res) => {
         message: "Loan not found.",
       });
     }
+
+    // ======================================================
+    // Final Submission
+    // ======================================================
 
     verification.status = "SUBMITTED";
     verification.submittedAt = new Date();
@@ -715,16 +845,24 @@ export const submitVerification = async (req, res) => {
       success: true,
       message:
         "Verification submitted successfully. Waiting for admin approval.",
+      data: {
+        verificationId: verification.verificationId,
+        jobId: verification.jobId,
+        status: verification.status,
+        submittedAt: verification.submittedAt,
+      },
     });
+
   } catch (error) {
     await session.abortTransaction();
 
-    console.error(error);
+    console.error("Submit Verification Error:", error);
 
     return res.status(500).json({
       success: false,
       message: error.message,
     });
+
   } finally {
     session.endSession();
   }
@@ -921,32 +1059,94 @@ export const saveWitness = async (req, res) => {
       agreed,
     } = req.body;
 
-    // =============================
-    // Save Witness Details
-    // =============================
+    // ======================================
+    // Validation
+    // ======================================
 
-    if (fullName) verification.witness.fullName = fullName;
-
-    if (mobile) verification.witness.mobile = mobile;
-
-    if (relation) verification.witness.relation = relation;
-
-    if (idType) verification.witness.idType = idType;
-
-    if (idNumber) verification.witness.idNumber = idNumber;
-
-    if (typeof agreed !== "undefined") {
-      verification.witness.agreed =
-        agreed === true || agreed === "true";
-
-      if (verification.witness.agreed) {
-        verification.witness.signedAt = new Date();
-      }
+    if (!fullName?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Witness name is required.",
+      });
     }
 
-    // =============================
-    // Upload Witness Signature
-    // =============================
+    if (!mobile) {
+      return res.status(400).json({
+        success: false,
+        message: "Witness mobile number is required.",
+      });
+    }
+
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid mobile number.",
+      });
+    }
+
+    if (!relation) {
+      return res.status(400).json({
+        success: false,
+        message: "Relation is required.",
+      });
+    }
+
+    if (!idType) {
+      return res.status(400).json({
+        success: false,
+        message: "ID Type is required.",
+      });
+    }
+
+    if (!idNumber?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "ID Number is required.",
+      });
+    }
+
+    if (!(agreed === true || agreed === "true")) {
+      return res.status(400).json({
+        success: false,
+        message: "Please accept witness declaration.",
+      });
+    }
+
+    // ======================================
+    // Save Witness Details
+    // ======================================
+
+    verification.witness = {
+      ...verification.witness,
+
+      ...(fullName && {
+        fullName: fullName.trim(),
+      }),
+
+      ...(mobile && {
+        mobile: mobile.trim(),
+      }),
+
+      ...(relation && {
+        relation,
+      }),
+
+      ...(idType && {
+        idType,
+      }),
+
+      ...(idNumber && {
+        idNumber: idNumber.trim(),
+      }),
+
+      agreed: true,
+
+      signedAt: new Date(),
+    };
+
+    // ======================================
+    // Upload Signature
+    // ======================================
 
     if (req.files?.signature?.length) {
       const uploaded = await uploadToCloudinary(
@@ -957,12 +1157,13 @@ export const saveWitness = async (req, res) => {
       verification.witness.signature = {
         url: uploaded.secure_url,
         publicId: uploaded.public_id,
+        uploadedAt: new Date(),
       };
     }
 
-    // =============================
-    // Upload Witness Selfie
-    // =============================
+    // ======================================
+    // Upload Selfie
+    // ======================================
 
     if (req.files?.selfie?.length) {
       const uploaded = await uploadToCloudinary(
@@ -973,12 +1174,13 @@ export const saveWitness = async (req, res) => {
       verification.witness.selfie = {
         url: uploaded.secure_url,
         publicId: uploaded.public_id,
+        uploadedAt: new Date(),
       };
     }
 
-    // =============================
-    // Upload Witness ID
-    // =============================
+    // ======================================
+    // Upload ID Document
+    // ======================================
 
     if (req.files?.idDocument?.length) {
       const uploaded = await uploadToCloudinary(
@@ -989,12 +1191,13 @@ export const saveWitness = async (req, res) => {
       verification.witness.idDocument = {
         url: uploaded.secure_url,
         publicId: uploaded.public_id,
+        uploadedAt: new Date(),
       };
     }
 
-    // =============================
-    // Update Status
-    // =============================
+    // ======================================
+    // Start Verification
+    // ======================================
 
     if (verification.status === "ASSIGNED") {
       verification.status = "IN_PROGRESS";
@@ -1003,11 +1206,25 @@ export const saveWitness = async (req, res) => {
 
     await verification.save();
 
+    // ======================================
+    // Progress
+    // ======================================
+
+    const progress = getVerificationProgress(verification);
+
     return res.status(200).json({
       success: true,
       message: "Witness details saved successfully.",
-      data: verification.witness,
+
+      data: {
+        witness: verification.witness,
+
+        progress,
+
+        canResume: true,
+      },
     });
+
   } catch (error) {
     console.error("Save Witness Error:", error);
 
@@ -1017,7 +1234,6 @@ export const saveWitness = async (req, res) => {
     });
   }
 };
-
 
 
 
@@ -1563,6 +1779,366 @@ const verifications = await VisitorVerification.find({
       success: false,
       message: "Failed to fetch visitor dashboard.",
       error: err.message,
+    });
+  }
+};
+
+
+
+
+export const getVerificationReview = async (req, res) => {
+  try {
+    const { loanId } = req.params;
+
+    const verification = await VisitorVerification.findOne({
+      loan: loanId,
+      visitor: req.user._id,
+    })
+      .populate("customer", "fullName mobile")
+      .populate("loan", "applicationId amount status stage");
+
+    if (!verification) {
+      return res.status(404).json({
+        success: false,
+        message: "Verification not found.",
+      });
+    }
+
+    // ================================
+    // Section Completion Checks
+    // ================================
+
+    const investigationCompleted =
+      !!verification.investigation &&
+      (
+        verification.investigation.customerAvailable ||
+        verification.investigation.customerVerified ||
+        verification.investigation.addressVerified ||
+        verification.investigation.employmentVerified ||
+        verification.investigation.businessVerified ||
+        verification.investigation.incomeVerified ||
+        verification.investigation.originalDocumentsVerified ||
+        verification.investigation.photocopiesCollected ||
+        verification.investigation.houseVisited ||
+        verification.investigation.neighboursVerified
+      );
+
+    const photosCompleted = verification.photos.length > 0;
+
+    const documentsCompleted = verification.documents.length > 0;
+
+    const witnessCompleted = verification.witness?.agreed === true;
+
+    const consentCompleted =
+      verification.customerConsent?.accepted === true;
+
+    const declarationCompleted =
+      verification.visitorDeclaration?.accepted === true;
+
+    const recommendationCompleted = !!verification.recommendation;
+
+    // ================================
+    // Missing Sections
+    // ================================
+
+    const missing = [];
+
+    if (!investigationCompleted) missing.push("INVESTIGATION");
+    if (!photosCompleted) missing.push("PHOTOS");
+    if (!documentsCompleted) missing.push("DOCUMENTS");
+    if (!witnessCompleted) missing.push("WITNESS");
+    if (!consentCompleted) missing.push("CUSTOMER_CONSENT");
+    if (!declarationCompleted) missing.push("DECLARATION");
+    if (!recommendationCompleted) missing.push("RECOMMENDATION");
+
+    // ================================
+    // Ready For Submit
+    // ================================
+
+    const readyForSubmit = missing.length === 0;
+
+    // ================================
+    // Photo Preview (max 4)
+    // ================================
+
+    const photoPreview = verification.photos
+      .slice(0, 4)
+      .map((photo) => ({
+        category: photo.category,
+        url: photo.url,
+      }));
+
+    // ================================
+    // Final Response
+    // ================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Review details fetched successfully.",
+
+      data: {
+        jobId: verification.jobId,
+        verificationId: verification.verificationId,
+
+        loan: verification.loan,
+        customer: verification.customer,
+
+        status: verification.status,
+
+        // ======================
+        // Review Summary
+        // ======================
+
+        summary: {
+          investigationCompleted,
+          photosCompleted,
+          documentsCompleted,
+          witnessCompleted,
+          consentCompleted,
+          declarationCompleted,
+          recommendationCompleted,
+
+          totalPhotos: verification.photos.length,
+          totalDocuments: verification.documents.length,
+          totalVideos: verification.videos.length,
+
+          readyForSubmit,
+          missing,
+        },
+
+        // ======================
+        // UI Cards
+        // ======================
+
+        cards: {
+          verification: {
+            completed: readyForSubmit,
+          },
+
+          investigation: {
+            completed: investigationCompleted,
+            editable: true,
+          },
+
+          photos: {
+            completed: photosCompleted,
+            editable: true,
+            count: verification.photos.length,
+            preview: photoPreview,
+          },
+
+          documents: {
+            completed: documentsCompleted,
+            editable: true,
+            count: verification.documents.length,
+          },
+
+          witness: {
+            completed: witnessCompleted,
+            editable: true,
+            data: verification.witness,
+          },
+
+          remarks: {
+            completed: !!verification.remarks,
+            editable: true,
+            value: verification.remarks || "",
+          },
+
+          recommendation: {
+            completed: recommendationCompleted,
+            editable: true,
+            value: verification.recommendation,
+          },
+        },
+
+        // ======================
+        // Full Editable Data
+        // ======================
+
+        editableData: {
+          investigation: verification.investigation,
+          location: verification.location,
+          photos: verification.photos,
+          videos: verification.videos,
+          documents: verification.documents,
+          witness: verification.witness,
+          customerConsent: verification.customerConsent,
+          visitorDeclaration: verification.visitorDeclaration,
+          recommendation: verification.recommendation,
+          remarks: verification.remarks,
+        },
+
+        // ======================
+        // Timeline
+        // ======================
+
+        timeline: {
+          startedAt: verification.startedAt,
+          submittedAt: verification.submittedAt,
+          completedAt: verification.completedAt,
+          lastSavedAt: verification.updatedAt,
+        },
+      },
+    });
+  } catch (err) {
+    console.error("Get Verification Review Error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+export const getSubmitSummary = async (req, res) => {
+  try {
+    const { loanId } = req.params;
+
+    const verification = await VisitorVerification.findOne({
+      loan: loanId,
+      visitor: req.user._id,
+    })
+      .populate("customer", "fullName mobile")
+      .populate("loan", "applicationId amount");
+
+    if (!verification) {
+      return res.status(404).json({
+        success: false,
+        message: "Verification not found.",
+      });
+    }
+
+    // ==============================
+    // File Counts
+    // ==============================
+
+    const totalPhotos = verification.photos?.length || 0;
+    const totalVideos = verification.videos?.length || 0;
+    const totalDocuments = verification.documents?.length || 0;
+
+    const totalFiles =
+      totalPhotos +
+      totalVideos +
+      totalDocuments;
+
+    // ==============================
+    // Metadata Status
+    // ==============================
+
+    const metadataVerified =
+      !!verification.location?.latitude &&
+      !!verification.location?.longitude &&
+      verification.customerConsent?.accepted;
+
+    // ==============================
+    // Final Review
+    // ==============================
+
+    const finalReview =
+      verification.recommendation &&
+      verification.photos.length > 0 &&
+      verification.documents.length > 0 &&
+      verification.witness?.agreed;
+
+    // ==============================
+    // Submit Allowed
+    // ==============================
+
+    const submitAllowed =
+      metadataVerified &&
+      finalReview &&
+      verification.finalDeclaration?.informationCorrect &&
+      verification.finalDeclaration?.photosGenuine &&
+      verification.finalDeclaration?.investigationCompleted;
+
+    return res.status(200).json({
+      success: true,
+      message: "Submit summary fetched successfully.",
+
+      data: {
+        loan: verification.loan,
+
+        customer: verification.customer,
+
+        declaration: verification.finalDeclaration,
+
+        summary: {
+          totalPhotos,
+          totalVideos,
+          totalDocuments,
+          totalFiles,
+
+          metadataStatus:
+            metadataVerified ? "VERIFIED" : "PENDING",
+
+          finalReview:
+            finalReview ? "READY" : "INCOMPLETE",
+        },
+
+        submitAllowed,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
+
+
+export const saveFinalDeclaration = async (req, res) => {
+  try {
+    const { loanId } = req.params;
+
+    const {
+      informationCorrect,
+      photosGenuine,
+      investigationCompleted,
+    } = req.body;
+
+    const verification = await VisitorVerification.findOne({
+      loan: loanId,
+      visitor: req.user._id,
+    });
+
+    if (!verification) {
+      return res.status(404).json({
+        success: false,
+        message: "Verification not found.",
+      });
+    }
+
+    if (verification.status === "SUBMITTED") {
+      return res.status(400).json({
+        success: false,
+        message: "Verification already submitted.",
+      });
+    }
+
+    verification.finalDeclaration = {
+      informationCorrect,
+      photosGenuine,
+      investigationCompleted,
+      acceptedAt: new Date(),
+    };
+
+    await verification.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Final declaration saved successfully.",
+      data: verification.finalDeclaration,
+    });
+  } catch (err) {
+    console.error(err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
     });
   }
 };

@@ -146,7 +146,24 @@ jobId: {
     }
 }
 ],
+finalDeclaration: {
+    informationCorrect: {
+        type: Boolean,
+        default: false
+    },
 
+    photosGenuine: {
+        type: Boolean,
+        default: false
+    },
+
+    investigationCompleted: {
+        type: Boolean,
+        default: false
+    },
+
+    acceptedAt: Date
+},
 documents:[
 {
     type:{

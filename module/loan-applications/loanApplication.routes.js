@@ -27,7 +27,7 @@ import {
   saveWitness,
   getVerificationDetails,
   getMyApplications,
-  getApplicationProgress,getVisitorDashboard
+  getApplicationProgress,getVisitorDashboard,getVerificationReview
 } from "./controller/loanApproval.controller.js";
 
 const router = express.Router();
@@ -156,5 +156,15 @@ router.get(
 protect,
   getVisitorDashboard
 );
+
+
+router.get(
+  "/applications/:loanId/review",
+  protect,
+  getVerificationReview
+);
+
+// router.post('/get-summery',protect,)
+
 
 export default router;
