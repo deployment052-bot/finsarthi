@@ -2,7 +2,7 @@ import express from "express";
 import {
   createTicket,
   getUserTickets,
-  getAllTickets,
+  getAllTickets,startChat,replyChat,cancelChat,resolveTicket
 } from "./ticket.controller.js";
 
 import { protect } from "../../middleware/authMiddleware.js";
@@ -30,5 +30,35 @@ router.get("/tickets", protect, getUserTickets);
  */
 
 router.get("/admin/tickets", protect, getAllTickets);
+
+
+// Start Chatbot
+router.post(
+  "/chat/start",
+  protect,
+  startChat
+);
+
+
+// Reply Chatbot Answer
+router.post(
+  "/chat/reply",
+  protect,
+  replyChat
+);
+
+
+// Cancel Chat
+router.post(
+  "/chat/cancel",
+  protect,
+  cancelChat
+);
+
+router.patch(
+  "/:ticketId/resolve",
+protect,
+  resolveTicket
+);
 
 export default router;

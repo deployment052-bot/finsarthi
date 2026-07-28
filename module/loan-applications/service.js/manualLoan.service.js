@@ -10,6 +10,28 @@ export const applyManualLoan = async (req, res, product) => {
       documents = [],
     } = req.body;
 
+    // Validate loan amount
+    if (
+      amount < product.minAmount ||
+      amount > product.maxAmount
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Loan amount must be between ${product.minAmount} and ${product.maxAmount}`,
+      });
+    }
+
+    // Validate tenure
+    if (
+      tenure < product.minTenure ||
+      tenure > product.maxTenure
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `Loan tenure must be between ${product.minTenure} and ${product.maxTenure} months`,
+      });
+    }
+
     // Fetch assigned documents for this loan product
     const mappings = await LoanProductDocument.find({
       loanProduct: product._id,
@@ -20,14 +42,14 @@ export const applyManualLoan = async (req, res, product) => {
       (item) => item.mandatory
     );
 
-    // Validate uploaded documents
+    // Validate uploaded mandatory documents
     for (const doc of mandatoryDocs) {
       const uploaded = documents.find(
         (d) =>
           d.documentId === doc.document._id.toString()
       );
 
-      if (!uploaded) {
+      if (!uploaded || !uploaded.file) {
         return res.status(400).json({
           success: false,
           message: `${doc.document.name} is required`,

@@ -160,7 +160,41 @@ const loanApplicationSchema = new mongoose.Schema(
         message: String,
       },
     },
+documents: [
+  {
+    document: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "DocumentMaster",
+      required: true,
+    },
 
+    file: {
+      type: String,
+      required: true,
+    },
+
+    verified: {
+      type: Boolean,
+      default: false,
+    },
+
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+    },
+
+    verifiedAt: {
+      type: Date,
+      default: null,
+    },
+
+    remarks: {
+      type: String,
+      default: "",
+    },
+  },
+],
     riskSnapshot: {
       score: Number,
       grade: String,
