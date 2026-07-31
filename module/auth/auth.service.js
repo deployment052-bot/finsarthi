@@ -143,10 +143,14 @@ export const registerService = async ({
   mpin,
   req,
 }) => {
-  if (!fullName || !mobile || !mpin) {
-    throw new Error("Full name, mobile and MPIN are required");
+  // 1️⃣ Basic validation
+  if (!fullName || !mobile || !email || !mpin) {
+    throw new Error(
+      "Full name, mobile, email and MPIN are required"
+    );
   }
 
+  // 2️⃣ Check OTP verification
   const otpDoc = await Otp.findOne({
     mobile,
     verified: true,
@@ -156,42 +160,57 @@ export const registerService = async ({
     throw new Error("Please verify OTP first");
   }
 
+  // 3️⃣ Check existing mobile
   const mobileExists = await User.findOne({ mobile });
+
   if (mobileExists) {
+    // OTP invalidate
+    await Otp.deleteMany({ mobile });
+
     throw new Error("Mobile already registered");
   }
 
-  if (email) {
-    const emailExists = await User.findOne({ email });
-    if (emailExists) {
-      throw new Error("Email already registered");
-    }
+  // 4️⃣ Check existing email
+  const emailExists = await User.findOne({ email });
+
+  if (emailExists) {
+    // OTP invalidate
+    await Otp.deleteMany({ mobile });
+
+    throw new Error("Email already registered");
   }
 
+  // 5️⃣ Hash MPIN
   const hashedMpin = await bcrypt.hash(mpin, 10);
 
-  const customerId = `FS${Date.now()}${nanoid(4).toUpperCase()}`;
+  // 6️⃣ Create customer ID
+  const customerId =
+    `FS${Date.now()}${nanoid(4).toUpperCase()}`;
 
+  // 7️⃣ Create user
   const user = await User.create({
     customerId,
     fullName,
     mobile,
     email,
-    mpin: hashedMpin, // 🔥 THIS WAS MISSING
+    mpin: hashedMpin,
     mobileVerified: true,
   });
 
+  // 8️⃣ OTP is consumed after successful registration
   await Otp.deleteMany({ mobile });
 
-const { accessToken, refreshToken } =
-  await createSession({
-    user,
-    req,
-    userType: "User",
-  });
+  // 9️⃣ Create session
+  const { accessToken, refreshToken } =
+    await createSession({
+      user,
+      req,
+      userType: "User",
+    });
 
   return {
     message: "User registered successfully",
+
     data: {
       customerId: user.customerId,
       fullName: user.fullName,
@@ -199,6 +218,7 @@ const { accessToken, refreshToken } =
       email: user.email,
       mobileVerified: user.mobileVerified,
     },
+
     accessToken,
     refreshToken,
   };

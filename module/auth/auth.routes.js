@@ -8,29 +8,22 @@ import {
 import {adminLogin,registerEmployee,verifyForgotPasswordOtp,resetPassword,forgotPassword }from "./admin/admin.controller.js"
 import {protect} from "../../middleware/authMiddleware.js"
 
-import {
-  loginLimiter,
-  sendOtpLimiter,
-  verifyOtpLimiter,
-  registerLimiter,
-  refreshTokenLimiter,
-  forgotPasswordLimiter,
-} from "../../middleware/rateLimiter.js";
+
 const router = express.Router();
 
-router.post("/send-otp",sendOtpLimiter, sendOtp);
+router.post("/send-otp", sendOtp);
 router.post("/verify-otp", verifyOtp);
 router.post("/register", register);
-router.post('/login',loginLimiter,login)
+router.post('/login',login)
 
-router.post('/admin-login',loginLimiter,adminLogin)
-router.post("/employee/login", loginLimiter,employeeLogin);
+router.post('/admin-login',adminLogin)
+router.post("/employee/login",employeeLogin);
 
 
 router.post('/emp-register',protect,registerEmployee)
 
 // this is for admin and employee
-router.post('/forgetpass',forgotPasswordLimiter,forgotPassword)
+router.post('/forgetpass',forgotPassword)
 router.post(
   "/verify-forgot-password-otp",
   verifyForgotPasswordOtp
