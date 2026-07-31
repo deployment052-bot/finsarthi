@@ -64,9 +64,13 @@ export const verifyOtp = async (req, res) => {
  * REGISTER (MPIN SET + TOKEN ISSUE)
  */
 export const register = async (req, res) => {
-   console.log("BODY:", req.body);
+  console.log("BODY:", req.body);
+
   try {
-    const result = await registerService(req.body);
+    const result = await registerService({
+      ...req.body,
+      req,
+    });
 
     return res.status(201).json({
       success: true,
@@ -76,6 +80,8 @@ export const register = async (req, res) => {
       refreshToken: result.refreshToken,
     });
   } catch (err) {
+    console.error("REGISTER ERROR:", err);
+
     return res.status(400).json({
       success: false,
       message: err.message || "Registration failed",
