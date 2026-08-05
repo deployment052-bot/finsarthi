@@ -8,7 +8,14 @@ import {
 import {adminLogin,registerEmployee,verifyForgotPasswordOtp,resetPassword,forgotPassword }from "./admin/admin.controller.js"
 import {protect} from "../../middleware/authMiddleware.js"
 
-
+import {
+  loginLimiter,
+  sendOtpLimiter,
+  verifyOtpLimiter,
+  registerLimiter,
+  refreshTokenLimiter,
+  forgotPasswordLimiter,
+} from "../../middleware/rateLimiter.js";
 const router = express.Router();
 
 router.post("/send-otp", sendOtp);

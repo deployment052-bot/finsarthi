@@ -11,7 +11,7 @@ class NotificationService {
     image = null,
     document = null,
     fileName = null,
-    sendWhatsapp = false,
+    send = false,
   }) {
     console.log("🔥 Notification Service Triggered");
 

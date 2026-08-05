@@ -4,6 +4,9 @@ import { nanoid } from "nanoid";
 import User from "../User/models.js";
 import Otp from "./otp.model.js";
 import { createSession } from "./service/createSession.js";
+import Notification from "../notification/notification.model.js";
+import whatsappService from "../notification/service/whatsapp.service.js";
+import emailService from "../notification/service/email.service.js";
 const generateOtp = () =>
   Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -196,7 +199,69 @@ export const registerService = async ({
     mpin: hashedMpin,
     mobileVerified: true,
   });
+// 1️⃣ IN-APP NOTIFICATION
+await Notification.create({
+  user: user._id,
+  title: "Welcome to FinSarthi 🎉",
+  message: `Hi ${user.fullName}, your account has been successfully created.`,
+  type: "ACCOUNT",
+  visible: true,
+  read: false,
+  data: {
+    screen: "Home",
+    action: "REGISTRATION_SUCCESS",
+  },
+});
 
+try {
+  await emailService.sendEmail({
+    to: user.email,
+
+    subject: "Welcome to FinSarthi 🎉",
+
+    text: `Hi ${user.fullName}, your FinSarthi account has been successfully created.`,
+
+    html: `
+      <div>
+        <h2>Welcome to FinSarthi 🎉</h2>
+
+        <p>Hi ${user.fullName},</p>
+
+        <p>
+          Your FinSarthi account has been successfully created.
+        </p>
+
+        <p>
+          You can now login and start using FinSarthi.
+        </p>
+
+        <br />
+
+        <p>Regards,<br/>FinSarthi Team</p>
+      </div>
+    `,
+  });
+
+  console.log("✅ Registration Email Sent");
+
+} catch (error) {
+  console.error(
+    "❌ Registration Email Error:",
+    error.message
+  );
+}
+
+try {
+  await whatsappService.sendText(
+    user.mobile,
+    `Hi ${user.fullName}, your FinSarthi account has been successfully created. 🎉`
+  );
+} catch (error) {
+  console.error(
+    "WhatsApp Error:",
+    error.message
+  );
+}
   // 8️⃣ OTP is consumed after successful registration
   await Otp.deleteMany({ mobile });
 

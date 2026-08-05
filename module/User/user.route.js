@@ -6,5 +6,16 @@ const router = express.Router();
 
 router.get("/v1/profile", protect, getProfile);
 router.get('/v1/get-verification',protect,getVerificationStatus)
-router.get('/v1/get-kyc',protect,getKycProgress)
+
+router.get(
+  "/v1/get-kyc",
+  (req, res, next) => {
+    console.log("🔥🔥 GET-KYC ROUTE HIT");
+    next();
+  },
+  protect,
+  getKycProgress
+);
+
+
 export default router;

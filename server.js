@@ -58,7 +58,7 @@ recoveryCron.start();
 // ==========================
 app.use("/auth/v1", auth);
 app.use("/ekyc", key);
-app.use("/bank", bank);
+app.use("/bank/v1", bank);
 app.use("/system", system);
 app.use("/User", User);
 app.use("/notification", notification);

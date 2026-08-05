@@ -56,6 +56,7 @@ export const getMyBankAccount = async (
   }
 };
 
+//this is for mask details get 
 export const getBankDetails = async (req, res) => {
   try {
     const userId = req.user?._id || req.user?.id;

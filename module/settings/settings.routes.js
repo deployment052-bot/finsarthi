@@ -7,7 +7,7 @@ import {
 
 const router = express.Router();
 
-router.get("/", protect, getSettings);
-router.patch("/", protect, updateSettings);
+router.get("/bio-metric", protect, getSettings);
+router.patch("/add-bio", protect, updateSettings);
 
 export default router;
