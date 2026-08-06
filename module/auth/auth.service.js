@@ -163,13 +163,20 @@ export const registerService = async ({
     throw new Error("Please verify OTP first");
   }
 
+  // 2️⃣.1 Check OTP expiry
+  if (new Date() > otpDoc.expiresAt) {
+    await Otp.deleteOne({ _id: otpDoc._id });
+
+    throw new Error(
+      "OTP expired. Please request a new OTP."
+    );
+  }
+
   // 3️⃣ Check existing mobile
   const mobileExists = await User.findOne({ mobile });
 
   if (mobileExists) {
-    // OTP invalidate
-    await Otp.deleteMany({ mobile });
-
+    // ❌ OTP delete MAT karo
     throw new Error("Mobile already registered");
   }
 
@@ -177,9 +184,7 @@ export const registerService = async ({
   const emailExists = await User.findOne({ email });
 
   if (emailExists) {
-    // OTP invalidate
-    await Otp.deleteMany({ mobile });
-
+    // ❌ OTP delete MAT karo
     throw new Error("Email already registered");
   }
 
@@ -199,73 +204,77 @@ export const registerService = async ({
     mpin: hashedMpin,
     mobileVerified: true,
   });
-// 1️⃣ IN-APP NOTIFICATION
-await Notification.create({
-  user: user._id,
-  title: "Welcome to FinSarthi 🎉",
-  message: `Hi ${user.fullName}, your account has been successfully created.`,
-  type: "ACCOUNT",
-  visible: true,
-  read: false,
-  data: {
-    screen: "Home",
-    action: "REGISTRATION_SUCCESS",
-  },
-});
 
-try {
-  await emailService.sendEmail({
-    to: user.email,
-
-    subject: "Welcome to FinSarthi 🎉",
-
-    text: `Hi ${user.fullName}, your FinSarthi account has been successfully created.`,
-
-    html: `
-      <div>
-        <h2>Welcome to FinSarthi 🎉</h2>
-
-        <p>Hi ${user.fullName},</p>
-
-        <p>
-          Your FinSarthi account has been successfully created.
-        </p>
-
-        <p>
-          You can now login and start using FinSarthi.
-        </p>
-
-        <br />
-
-        <p>Regards,<br/>FinSarthi Team</p>
-      </div>
-    `,
+  // 8️⃣ IN-APP NOTIFICATION
+  await Notification.create({
+    user: user._id,
+    title: "Welcome to FinSarthi 🎉",
+    message: `Hi ${user.fullName}, your account has been successfully created.`,
+    type: "ACCOUNT",
+    visible: true,
+    read: false,
+    data: {
+      screen: "Home",
+      action: "REGISTRATION_SUCCESS",
+    },
   });
 
-  console.log("✅ Registration Email Sent");
+  // 9️⃣ Email Notification
+  try {
+    await emailService.sendEmail({
+      to: user.email,
 
-} catch (error) {
-  console.error(
-    "❌ Registration Email Error:",
-    error.message
-  );
-}
+      subject: "Welcome to FinSarthi 🎉",
 
-try {
-  await whatsappService.sendText(
-    user.mobile,
-    `Hi ${user.fullName}, your FinSarthi account has been successfully created. 🎉`
-  );
-} catch (error) {
-  console.error(
-    "WhatsApp Error:",
-    error.message
-  );
-}
-  // 8️⃣ OTP is consumed after successful registration
+      text: `Hi ${user.fullName}, your FinSarthi account has been successfully created.`,
+
+      html: `
+        <div>
+          <h2>Welcome to FinSarthi 🎉</h2>
+
+          <p>Hi ${user.fullName},</p>
+
+          <p>
+            Your FinSarthi account has been successfully created.
+          </p>
+
+          <p>
+            You can now login and start using FinSarthi.
+          </p>
+
+          <br />
+
+          <p>Regards,<br/>FinSarthi Team</p>
+        </div>
+      `,
+    });
+
+    console.log("✅ Registration Email Sent");
+
+  } catch (error) {
+    console.error(
+      "❌ Registration Email Error:",
+      error.message
+    );
+  }
+
+  // 🔟 WhatsApp Notification
+  try {
+    await whatsappService.sendText(
+      user.mobile,
+      `Hi ${user.fullName}, your FinSarthi account has been successfully created. 🎉`
+    );
+  } catch (error) {
+    console.error(
+      "WhatsApp Error:",
+      error.message
+    );
+  }
+
+  // 1️⃣1️⃣ OTP is consumed ONLY after successful registration
   await Otp.deleteMany({ mobile });
 
-  // 9️⃣ Create session
+  // 1️⃣2️⃣ Create session
   const { accessToken, refreshToken } =
     await createSession({
       user,

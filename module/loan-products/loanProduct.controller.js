@@ -311,16 +311,34 @@ export const getDocuments = async (req, res) => {
 // Get All Loan Products
 export const getLoanProducts = async (req, res) => {
   try {
-    const products = await LoanProduct.find().sort({
-      createdAt: -1,
-    });
+    const products = await LoanProduct.find({
+      active: true,
+      code: { $exists: true, $ne: "" },
+    })
+      .sort({
+        createdAt: -1,
+      })
+      .lean();
+
+    const formattedProducts = products.map((product) => ({
+      ...product,
+
+      // Consistent loan processing type
+      processingType:
+        product.processingType ||
+        (product.type === "INSTANT"
+          ? "INSTANT"
+          : "MANUAL"),
+    }));
 
     return res.status(200).json({
       success: true,
-      count: products.length,
-      data: products,
+      count: formattedProducts.length,
+      data: formattedProducts,
     });
   } catch (error) {
+    console.error("Get Loan Products Error:", error);
+
     return res.status(500).json({
       success: false,
       message: error.message,

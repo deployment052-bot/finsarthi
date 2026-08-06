@@ -1,5 +1,6 @@
 import BankAccount from "./BankAccount.model.js";
 import { sendNotification } from "../notification/serrvice.js";
+
 export const createBankAccount = async (
   req,
   res

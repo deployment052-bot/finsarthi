@@ -58,6 +58,8 @@ export const applyLoan = async (req, res) => {
     });
   }
 };
+
+
 export const uploadLoanDocument = async (req, res) => {
     const { documentId } = req.body;
 
