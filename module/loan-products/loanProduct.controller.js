@@ -320,16 +320,37 @@ export const getLoanProducts = async (req, res) => {
       })
       .lean();
 
-    const formattedProducts = products.map((product) => ({
-      ...product,
+    const formattedProducts = await Promise.all(
+      products.map(async (product) => {
+        // Fetch documents assigned to this product
+        const documentMappings = await LoanProductDocument.find({
+          loanProduct: product._id,
+        })
+          .populate("document")
+          .lean();
 
-      // Consistent loan processing type
-      processingType:
-        product.processingType ||
-        (product.type === "INSTANT"
-          ? "INSTANT"
-          : "MANUAL"),
-    }));
+        const documents = documentMappings.map((item) => ({
+          documentId: item.document?._id,
+          name: item.document?.name,
+          code: item.document?.code,
+          mandatory: item.mandatory,
+        }));
+
+        return {
+          ...product,
+
+          // Consistent loan processing type
+          processingType:
+            product.processingType ||
+            (product.type === "INSTANT"
+              ? "INSTANT"
+              : "MANUAL"),
+
+          // Assigned documents
+          documents,
+        };
+      })
+    );
 
     return res.status(200).json({
       success: true,
