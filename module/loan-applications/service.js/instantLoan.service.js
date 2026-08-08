@@ -111,54 +111,54 @@ export const applyInstantLoan = async (req, res, product) => {
 
 
     // Notification + WhatsApp
-await notificationService.send({
-  user: customer._id,
-  phone: `91${customer.mobile}`,
+// await notificationService.send({
+//   user: customer._id,
+//   phone: `91${customer.mobile}`,
 
-  title: "Loan Application Submitted",
+//   title: "Loan Application Submitted",
 
-  // Optional Image (Cloudinary/S3/Public URL)
-  image:
-    "https://res.cloudinary.com/ddcy9noqo/image/upload/v1784358106/FinSarthi_Premium_Fintech_Logo_yvprkc.png",
+//   // Optional Image (Cloudinary/S3/Public URL)
+//   image:
+//     "https://res.cloudinary.com/ddcy9noqo/image/upload/v1784358106/FinSarthi_Premium_Fintech_Logo_yvprkc.png",
 
-  // Optional PDF
-  document: null,
-  fileName: null,
+//   // Optional PDF
+//   document: null,
+//   fileName: null,
 
-  message: `🏦 *FinSarthi*
+//   message: `🏦 *FinSarthi*
 
-Dear *${customer.fullName}*,
+// Dear *${customer.fullName}*,
 
-🎉 Your loan application has been submitted successfully and is currently under review.
+// 🎉 Your loan application has been submitted successfully and is currently under review.
 
-━━━━━━━━━━━━━━━━━━
-📄 *Application ID:* ${application.applicationId}
-💰 *Requested Amount:* ₹${application.amount.toLocaleString("en-IN")}
-📌 *Current Status:* ${application.status.replace(/_/g, " ")}
-📅 *Submitted On:* ${new Date(
-    application.createdAt
-  ).toLocaleDateString("en-IN")}
-━━━━━━━━━━━━━━━━━━
+// ━━━━━━━━━━━━━━━━━━
+// 📄 *Application ID:* ${application.applicationId}
+// 💰 *Requested Amount:* ₹${application.amount.toLocaleString("en-IN")}
+// 📌 *Current Status:* ${application.status.replace(/_/g, " ")}
+// 📅 *Submitted On:* ${new Date(
+//     application.createdAt
+//   ).toLocaleDateString("en-IN")}
+// ━━━━━━━━━━━━━━━━━━
 
-📋 *What's Next?*
-✅ Our team will review your application.
-✅ If additional documents or verification are required, we'll notify you immediately.
-✅ You'll receive instant updates whenever your application status changes.
+// 📋 *What's Next?*
+// ✅ Our team will review your application.
+// ✅ If additional documents or verification are required, we'll notify you immediately.
+// ✅ You'll receive instant updates whenever your application status changes.
 
-📱 *Track Your Application*
-https://app.finsarthi.com/loan/${application.applicationId}
+// 📱 *Track Your Application*
+// https://app.finsarthi.com/loan/${application.applicationId}
 
-💬 Need assistance?
-Our support team is always here to help.
+// 💬 Need assistance?
+// Our support team is always here to help.
 
-Thank you for choosing *FinSarthi*.
-We're committed to providing a fast, secure, and transparent lending experience.
+// Thank you for choosing *FinSarthi*.
+// We're committed to providing a fast, secure, and transparent lending experience.
 
-_This is an automated notification. Please do not reply to this message._`,
+// _This is an automated notification. Please do not reply to this message._`,
 
-  type: "LOAN",
-  sendWhatsapp: true,
-});
+//   type: "LOAN",
+//   sendWhatsapp: true,
+// });
 
     return res.status(201).json({
 

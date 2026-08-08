@@ -21,16 +21,62 @@ const maskAccountNumber = (accountNumber = "") => {
 
 export const applyLoan = async (req, res) => {
   try {
-    const { productId } = req.body;
+    console.log("========================================");
+    console.log("🔥 APPLY LOAN API HIT");
+    console.log("🔥 Request Body:", req.body);
+    console.log("🔥 Amount Received:", req.body.amount);
+    console.log("🔥 Tenure Received:", req.body.tenure);
+    console.log("🔥 Product ID Received:", req.body.productId);
+    console.log("========================================");
+
+    const { productId, amount, tenure, purpose } = req.body;
+
+    // Basic request validation
+    if (!productId) {
+      return res.status(400).json({
+        success: false,
+        message: "Product ID is required",
+      });
+    }
+
+    if (!amount) {
+      return res.status(400).json({
+        success: false,
+        message: "Loan amount is required",
+      });
+    }
+
+    if (!tenure) {
+      return res.status(400).json({
+        success: false,
+        message: "Loan tenure is required",
+      });
+    }
+
+    console.log("🔍 Searching Loan Product:", productId);
 
     const product = await LoanProduct.findById(productId);
 
     if (!product) {
+      console.log("❌ Loan product not found:", productId);
+
       return res.status(404).json({
         success: false,
         message: "Loan product not found",
       });
     }
+
+    console.log("========================================");
+    console.log("✅ PRODUCT FOUND");
+    console.log("Product ID:", product._id);
+    console.log("Product Name:", product.name);
+    console.log("Product Code:", product.code);
+    console.log("Loan Type:", product.loanType);
+    console.log("Processing Type:", product.processingType);
+    console.log("Minimum Amount:", product.minAmount);
+    console.log("Maximum Amount:", product.maxAmount);
+    console.log("Interest Rate:", product.interestRate);
+    console.log("========================================");
 
     // Snapshot prepare
     const productSnapshot = {
@@ -43,22 +89,46 @@ export const applyLoan = async (req, res) => {
       displayName: product.displayName,
     };
 
+    console.log("📦 Product Snapshot:", productSnapshot);
+
     // Attach snapshot
     product.productSnapshot = productSnapshot;
 
+    console.log("========================================");
+    console.log("💰 LOAN REQUEST DETAILS");
+    console.log("Requested Amount:", amount);
+    console.log("Requested Tenure:", tenure);
+    console.log("Purpose:", purpose);
+    console.log("Product Min Amount:", product.minAmount);
+    console.log("Product Max Amount:", product.maxAmount);
+    console.log("Processing Type:", product.processingType);
+    console.log("========================================");
+
+    // Manual Loan
     if (product.processingType === "MANUAL") {
+      console.log("🟡 MANUAL LOAN FLOW STARTED");
+
       return applyManualLoan(req, res, product);
     }
 
+    // Instant Loan
+    console.log("🟢 INSTANT LOAN FLOW STARTED");
+
     return applyInstantLoan(req, res, product);
+
   } catch (error) {
+    console.error("========================================");
+    console.error("❌ APPLY LOAN ERROR");
+    console.error("Error Message:", error.message);
+    console.error("Error Stack:", error.stack);
+    console.error("========================================");
+
     return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
 
 export const uploadLoanDocument = async (req, res) => {
     const { documentId } = req.body;
