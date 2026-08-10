@@ -195,6 +195,10 @@ documents: [
     },
   },
 ],
+applicationData: {
+  type: mongoose.Schema.Types.Mixed,
+  default: null,
+},
     riskSnapshot: {
       score: Number,
       grade: String,

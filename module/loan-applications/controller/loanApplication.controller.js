@@ -10,6 +10,10 @@ import { applyManualLoan } from "../service.js/manualLoan.service.js";
 import { applyInstantLoan } from "../service.js/instantLoan.service.js";
 import notificationService from "../../notification/service/notification.service.js";
 
+import User from "../../User/models.js";
+import KYC from "../../kyc/kyc.model.js";
+
+
 
 import {uploadToCloudinary} 
 from "../service.js/visitorVerification.service.js";
@@ -130,6 +134,105 @@ export const applyLoan = async (req, res) => {
   }
 };
 
+
+export const getLoanApplicationPrefill = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // ==========================================
+    // USER
+    // ==========================================
+    const user = await User.findById(userId).lean();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // ==========================================
+    // KYC
+    // ==========================================
+    const kyc = await KYC.findOne({
+      user: userId,
+    }).lean();
+
+    // ==========================================
+    // BANK ACCOUNT
+    // ==========================================
+    const bankAccount = await BankAccount.findOne({
+      user: userId,
+      isPrimary: true,
+    }).lean();
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+
+      data: {
+        personalDetails: {
+          fullName: user.name || "",
+          mobileNumber: user.mobile || "",
+          email: user.email || "",
+          dateOfBirth: kyc?.dateOfBirth || user.dateOfBirth || "",
+          gender: kyc?.gender || user.gender || "",
+        },
+
+        kycDetails: {
+          panNumber: maskPan(
+            kyc?.panNumber || kyc?.pan || ""
+          ),
+
+          aadhaarNumber: maskAadhaar(
+            kyc?.aadhaarNumber || kyc?.aadhaar || ""
+          ),
+
+          kycVerified: Boolean(
+            kyc?.verified || kyc?.status === "VERIFIED"
+          ),
+        },
+
+        addressDetails: {
+          addressLine1: kyc?.address?.addressLine1 || "",
+          addressLine2: kyc?.address?.addressLine2 || "",
+          city: kyc?.address?.city || "",
+          state: kyc?.address?.state || "",
+          pincode: kyc?.address?.pincode || "",
+        },
+
+        employmentDetails: {
+          employmentType: user.employmentType || "",
+          occupation: user.occupation || "",
+          monthlyIncome: user.monthlyIncome || 0,
+        },
+
+        bankDetails: bankAccount
+          ? {
+              bankName: bankAccount.bankName || "",
+              accountNumber: maskAccountNumber(
+                bankAccount.accountNumber
+              ),
+              ifsc: bankAccount.ifsc || "",
+              accountHolderName:
+                bankAccount.accountHolderName || "",
+              bankVerified: Boolean(bankAccount.verified),
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Loan Application Prefill Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch application prefill data",
+    });
+  }
+};
 export const uploadLoanDocument = async (req, res) => {
     const { documentId } = req.body;
 
@@ -239,13 +342,27 @@ export const getLoanById = async (req, res) => {
   try {
     const { loanId } = req.params;
 
-    // Loan
+    // ==========================================
+    // 1. VALIDATE LOAN ID
+    // ==========================================
+
+    if (!mongoose.Types.ObjectId.isValid(loanId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid loan ID.",
+      });
+    }
+
+    // ==========================================
+    // 2. GET LOAN
+    // ==========================================
+
     const loan = await LoanApplication.findOne({
       _id: loanId,
       customer: req.user._id,
       isDeleted: false,
     })
-      .populate("product", "name")
+      .populate("product")
       .lean();
 
     if (!loan) {
@@ -255,90 +372,227 @@ export const getLoanById = async (req, res) => {
       });
     }
 
-    const bankAccount = await bankAccount.findOne({});
+    // ==========================================
+    // 3. GET DISBURSEMENT
+    // ==========================================
 
-    // Disbursement Details
     const disbursement = await Disbursement.findOne({
       loanId: loan._id,
-    }).lean();
+    })
+      .sort({ createdAt: -1 })
+      .lean();
 
-    // EMI Schedule
+    // ==========================================
+    // 4. GET EMI SCHEDULE
+    // ==========================================
+
     const emis = await LoanEMI.find({
-      loan: loanId,
+      loan: loan._id,
     })
       .sort({ installmentNumber: 1 })
       .lean();
 
+    // ==========================================
+    // 5. FEE CALCULATION
+    // ==========================================
+
+    /*
+      IMPORTANT:
+
+      Replace these fields according to your
+      LoanProduct schema.
+
+      Example:
+      product.processingFee
+      product.processingFeePercentage
+
+      Currently we are supporting both:
+      - fixed processing fee
+      - percentage based processing fee
+    */
+
+    let processingFee = 0;
+
+    if (loan.product?.processingFee) {
+      processingFee = Number(loan.product.processingFee);
+    }
+
+    if (
+      loan.product?.processingFeePercentage &&
+      !loan.product?.processingFee
+    ) {
+      processingFee =
+        (Number(loan.approvedAmount || loan.amount || 0) *
+          Number(loan.product.processingFeePercentage)) /
+        100;
+    }
+
+    // ==========================================
+    // 6. TOTAL FEES
+    // ==========================================
+
+    const totalFees = processingFee;
+
+    // ==========================================
+    // 7. LOAN AMOUNT
+    // ==========================================
+
+    const loanAmount =
+      Number(loan.approvedAmount || loan.amount || 0);
+
+    // ==========================================
+    // 8. DISBURSAL AMOUNT
+    // ==========================================
+
+    const calculatedDisbursalAmount =
+      loanAmount - totalFees;
+
+    const disbursalAmount =
+      loan.disbursedAmount > 0
+        ? loan.disbursedAmount
+        : calculatedDisbursalAmount;
+
+    // ==========================================
+    // 9. EMI SCHEDULE
+    // ==========================================
+
+    const repaymentSchedule = emis.map((emi) => ({
+      emiId: emi.emiId,
+
+      installmentNumber: emi.installmentNumber,
+
+      dueDate: emi.dueDate,
+
+      emiAmount: emi.emiAmount,
+
+      principalAmount: emi.principalAmount,
+
+      interestAmount: emi.interestAmount,
+
+      penaltyAmount: emi.penaltyAmount,
+
+      totalDueAmount:
+        emi.totalDueAmount ??
+        Number(emi.emiAmount || 0) +
+          Number(emi.penaltyAmount || 0),
+
+      overdueDays: emi.overdueDays,
+
+      status: emi.status,
+
+      isClosed: emi.isClosed,
+    }));
+
+    // ==========================================
+    // 10. RESPONSE
+    // ==========================================
+
     return res.status(200).json({
       success: true,
+
       data: {
-        // Loan Info
-        loanId: loan._id,
-        applicationId: loan.applicationId,
-        loanNumber: loan.loanNumber,
+        // ======================================
+        // LOAN DETAILS
+        // ======================================
 
-        productName: loan.product?.name,
+        loanDetails: {
+          loanId: loan._id,
 
-        approvedAmount: loan.approvedAmount,
-        disbursedAmount: loan.disbursedAmount,
-        outstandingAmount: loan.outstandingAmount,
+          applicationId: loan.applicationId,
 
-        interestRate: loan.interestRate,
-        tenure: loan.tenure,
-        emiAmount: loan.emiAmount,
+          loanNumber: loan.loanNumber,
 
-        status: loan.status,
+          productName: loan.product?.name || null,
 
-        // Bank Transfer Details
+          loanRefNo:
+            loan.loanNumber ||
+            loan.applicationId ||
+            null,
+
+          approvedAmount: Number(
+            loan.approvedAmount || 0
+          ),
+
+          disbursementAmount: Number(
+            loan.disbursedAmount || 0
+          ),
+
+          outstandingAmount: Number(
+            loan.outstandingAmount || 0
+          ),
+
+          interestRate: loan.interestRate,
+
+          tenure: loan.tenure,
+
+          emiAmount: Number(
+            loan.emiAmount || 0
+          ),
+
+          status: loan.status,
+        },
+
+        // ======================================
+        // FEE DETAILS
+        // ======================================
+
+        feeDetails: {
+          loanAmount,
+
+          totalFees,
+
+          processingFee,
+
+          disbursalAmount,
+        },
+
+        // ======================================
+        // BANK / DISBURSEMENT DETAILS
+        // ======================================
+
         bankDetails: disbursement
           ? {
-              accountHolderName: disbursement.bankDetails?.accountHolderName,
+              accountHolderName:
+                disbursement.bankDetails
+                  ?.accountHolderName || null,
 
-              accountNumber: disbursement.bankDetails?.accountNumber,
+              accountNumber:
+                disbursement.bankDetails
+                  ?.accountNumber || null,
 
-              ifsc: disbursement.bankDetails?.ifsc,
+              ifsc:
+                disbursement.bankDetails?.ifsc ||
+                null,
 
-              utrNumber: disbursement.utrNumber,
+              utrNumber:
+                disbursement.utrNumber || null,
 
-              transferredAmount: disbursement.amount,
+              transferredAmount:
+                disbursement.amount || 0,
 
-              transferMethod: disbursement.method,
+              transferMethod:
+                disbursement.method || null,
 
-              transferStatus: disbursement.status,
+              transferStatus:
+                disbursement.status || null,
 
-              transferredAt: disbursement.processedAt,
+              transferredAt:
+                disbursement.processedAt || null,
             }
           : null,
 
-        // EMI Schedule
-        repaymentSchedule: emis.map((emi) => ({
-          emiId: emi.emiId,
+        // ======================================
+        // REPAYMENT SCHEDULE
+        // ======================================
 
-          installmentNumber: emi.installmentNumber,
-
-          dueDate: emi.dueDate,
-
-          emiAmount: emi.emiAmount,
-
-          principalAmount: emi.principalAmount,
-
-          interestAmount: emi.interestAmount,
-
-          penaltyAmount: emi.penaltyAmount,
-
-          totalDueAmount:
-            emi.totalDueAmount || emi.emiAmount + emi.penaltyAmount,
-
-          overdueDays: emi.overdueDays,
-
-          status: emi.status,
-
-          isClosed: emi.isClosed,
-        })),
+        repaymentSchedule,
       },
     });
   } catch (error) {
-    console.error("Get Loan Details Error:", error);
+    console.error(
+      "Get Loan Details Error:",
+      error
+    );
 
     return res.status(500).json({
       success: false,

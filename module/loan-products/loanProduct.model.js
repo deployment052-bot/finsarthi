@@ -2,7 +2,9 @@ import mongoose from "mongoose";
 
 const loanProductSchema = new mongoose.Schema(
   {
-    // Basic Information
+    // ==========================================
+    // BASIC INFORMATION
+    // ==========================================
     name: {
       type: String,
       required: true,
@@ -22,7 +24,9 @@ const loanProductSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Loan Category
+    // ==========================================
+    // LOAN CATEGORY
+    // ==========================================
     category: {
       type: String,
       enum: [
@@ -33,19 +37,24 @@ const loanProductSchema = new mongoose.Schema(
         "EDUCATION",
         "VEHICLE",
         "RENOVATION",
+        "AGRICULTURE",
         "OTHER",
       ],
       default: "PERSONAL",
     },
 
-    // Loan Processing
+    // ==========================================
+    // LOAN PROCESSING
+    // ==========================================
     processingType: {
       type: String,
       enum: ["INSTANT", "MANUAL"],
       required: true,
     },
 
-    // Loan Amount
+    // ==========================================
+    // LOAN AMOUNT
+    // ==========================================
     minAmount: {
       type: Number,
       required: true,
@@ -56,7 +65,9 @@ const loanProductSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Loan Tenure (Months)
+    // ==========================================
+    // LOAN TENURE
+    // ==========================================
     minTenure: {
       type: Number,
       required: true,
@@ -67,7 +78,9 @@ const loanProductSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Interest
+    // ==========================================
+    // INTEREST
+    // ==========================================
     interestRate: {
       type: Number,
       required: true,
@@ -79,14 +92,18 @@ const loanProductSchema = new mongoose.Schema(
       default: "FLAT",
     },
 
-    // EMI Frequency
+    // ==========================================
+    // EMI FREQUENCY
+    // ==========================================
     emiFrequency: {
       type: String,
       enum: ["DAILY", "WEEKLY", "MONTHLY"],
       default: "MONTHLY",
     },
 
-    // Charges
+    // ==========================================
+    // CHARGES
+    // ==========================================
     processingFee: {
       type: Number,
       default: 0,
@@ -103,7 +120,9 @@ const loanProductSchema = new mongoose.Schema(
       default: 18,
     },
 
-    // Eligibility
+    // ==========================================
+    // ELIGIBILITY
+    // ==========================================
     minRiskScore: {
       type: Number,
       default: 700,
@@ -114,7 +133,9 @@ const loanProductSchema = new mongoose.Schema(
       default: 1,
     },
 
-    // Loan Behaviour
+    // ==========================================
+    // LOAN BEHAVIOUR
+    // ==========================================
     instantDisbursement: {
       type: Boolean,
       default: false,
@@ -125,7 +146,9 @@ const loanProductSchema = new mongoose.Schema(
       default: false,
     },
 
-    // Overdue Configuration
+    // ==========================================
+    // OVERDUE CONFIGURATION
+    // ==========================================
     overdue: {
       enabled: {
         type: Boolean,
@@ -154,7 +177,24 @@ const loanProductSchema = new mongoose.Schema(
       },
     },
 
-    // Status
+    // ==========================================
+    // DYNAMIC FRONTEND FORM CONFIGURATION
+    // ==========================================
+    formConfiguration: {
+      fields: {
+        type: mongoose.Schema.Types.Mixed,
+        default: [],
+      },
+
+      documents: {
+        type: mongoose.Schema.Types.Mixed,
+        default: [],
+      },
+    },
+
+    // ==========================================
+    // STATUS
+    // ==========================================
     active: {
       type: Boolean,
       default: true,
