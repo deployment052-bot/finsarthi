@@ -6,7 +6,7 @@ import {
   applyLoan,
   getLoan,
   getLoanById,
-  downloadLoanStatement,
+  downloadLoanStatement,getLoanApplicationPrefill
 } from "./controller/loanApplication.controller.js";
 
 import {
@@ -43,7 +43,11 @@ router.get("/my-loans", protect, getLoan);
 
 router.get("/:loanId/statement", protect, downloadLoanStatement);
 
-
+router.get(
+  "/application/prefill",
+  protect,
+  getLoanApplicationPrefill
+);
 // ======================================================
 // LOAN APPROVAL
 // ======================================================
