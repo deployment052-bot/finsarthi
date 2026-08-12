@@ -3,7 +3,9 @@ import express from "express";
 import {
   createLoanProduct,
   getLoanProducts,
-  getLoanProductById,
+    getLoanProductById,
+  getLoanCategories,
+  getLoanProductsByCategory,
   updateLoanProduct,
   deleteLoanProduct,
   toggleLoanProductStatus,
@@ -19,13 +21,14 @@ getDocuments,
 import { protect} from "../../middleware/authMiddleware.js"
 const router = express.Router();
 
+
 /* ============================
    Loan Product APIs
 ============================ */
 
 router.post("/create/loan",protect, createLoanProduct);
 
-router.get("/get", getLoanProducts);
+router.get("/get-1", getLoanProducts);
 
 router.get("/:id/product", getLoanProductById);
 
@@ -44,6 +47,28 @@ router.post("/documents",protect, createDocument);
 /* Later Add */
 
  router.get("/documents", getDocuments);
+
+ router.get(
+  "/get",
+  getLoanCategories
+);
+
+/**
+ * Get Loan Products By Category
+ *
+ * GET /category/:category
+ *
+ * Example:
+ * GET /loan-products/category/GOLD
+ *
+ * GET /loan-products/category/PERSONAL
+ *
+ * GET /loan-products/category/EDUCATION
+ */
+router.get(
+  "/get/:category",
+  getLoanProductsByCategory
+);
 
 /// router.get("/documents/:id", getDocumentById);
 

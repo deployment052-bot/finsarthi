@@ -1,6 +1,20 @@
 import LoanProduct from "./loanProduct.model.js";
 import LoanProductDocument from "../loan-products/LoanProductDocument.model.js";
 import DocumentMaster from "../loan-products/DocumentMaster.model.js";
+const formatCategoryName = (category) => {
+  if (!category) {
+    return "";
+  }
+
+  return category
+    .toLowerCase()
+    .split("_")
+    .map(
+      (word) =>
+        word.charAt(0).toUpperCase() + word.slice(1)
+    )
+    .join(" ");
+};
 
 // Create Loan Product
 // import LoanProduct from "./loanProduct.model.js";
@@ -308,12 +322,21 @@ export const getDocuments = async (req, res) => {
   }
 };
 
-// Get All Loan Products
+
+
+
+// ==========================================
+// GET ALL LOAN PRODUCTS
+// ==========================================
+
 export const getLoanProducts = async (req, res) => {
   try {
     const products = await LoanProduct.find({
       active: true,
-      code: { $exists: true, $ne: "" },
+      code: {
+        $exists: true,
+        $ne: "",
+      },
     })
       .sort({
         createdAt: -1,
@@ -322,31 +345,90 @@ export const getLoanProducts = async (req, res) => {
 
     const formattedProducts = await Promise.all(
       products.map(async (product) => {
-        // Fetch documents assigned to this product
-        const documentMappings = await LoanProductDocument.find({
-          loanProduct: product._id,
-        })
-          .populate("document")
-          .lean();
 
-        const documents = documentMappings.map((item) => ({
-          documentId: item.document?._id,
-          name: item.document?.name,
-          code: item.document?.code,
-          mandatory: item.mandatory,
-        }));
+        // ==========================================
+        // FETCH ASSIGNED DOCUMENTS
+        // ==========================================
+
+        const documentMappings =
+          await LoanProductDocument.find({
+            loanProduct: product._id,
+            active: true,
+          })
+            .populate(
+              "document",
+              "name code description allowedTypes maxSizeMB"
+            )
+            .sort({
+              displayOrder: 1,
+            })
+            .lean();
+
+        const documents = documentMappings
+          .filter((item) => item.document)
+          .map((item) => ({
+            mappingId: item._id,
+
+            documentId: item.document._id,
+
+            name: item.document.name,
+
+            code: item.document.code,
+
+            description: item.document.description,
+
+            allowedTypes:
+              item.document.allowedTypes,
+
+            maxSizeMB:
+              item.document.maxSizeMB,
+
+            mandatory: item.mandatory,
+
+            displayOrder: item.displayOrder,
+          }));
+
+
+        // ==========================================
+        // FINAL PRODUCT RESPONSE
+        // ==========================================
 
         return {
           ...product,
 
-          // Consistent loan processing type
+          categoryName: formatCategoryName(
+            product.category
+          ),
+
           processingType:
             product.processingType ||
             (product.type === "INSTANT"
               ? "INSTANT"
               : "MANUAL"),
 
-          // Assigned documents
+          amount: {
+            min: product.minAmount,
+            max: product.maxAmount,
+          },
+
+          tenure: {
+            min: product.minTenure,
+            max: product.maxTenure,
+          },
+
+          interest: {
+            rate: product.interestRate,
+            type: product.interestType,
+          },
+
+          charges: {
+            processingFee: product.processingFee,
+            processingFeeType:
+              product.processingFeeType,
+            gstPercentage:
+              product.gstPercentage,
+          },
+
           documents,
         };
       })
@@ -357,8 +439,368 @@ export const getLoanProducts = async (req, res) => {
       count: formattedProducts.length,
       data: formattedProducts,
     });
+
   } catch (error) {
-    console.error("Get Loan Products Error:", error);
+    console.error(
+      "Get Loan Products Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+
+
+export const getLoanCategories = async (req, res) => {
+  try {
+    const products = await LoanProduct.find({
+      active: true,
+      code: {
+        $exists: true,
+        $ne: "",
+      },
+    })
+      .select(
+        "category type processingType"
+      )
+      .lean();
+
+    // ==========================================
+    // GROUP DATA MANUALLY
+    // ==========================================
+
+    const categoryMap = new Map();
+
+    for (const product of products) {
+      // ------------------------------------------
+      // CATEGORY
+      // ------------------------------------------
+
+      let category = product.category;
+
+      // Agar category missing hai but type INSTANT hai
+      if (
+        (!category || category === "") &&
+        (
+          product.processingType === "INSTANT" ||
+          product.type === "INSTANT"
+        )
+      ) {
+        category = "INSTANT";
+      }
+
+      // Invalid category skip
+      if (!category) {
+        continue;
+      }
+
+      // ------------------------------------------
+      // LOAN TYPE
+      // ------------------------------------------
+
+      let loanType =
+        product.processingType ||
+        product.type ||
+        "MANUAL";
+
+      // Agar category INSTANT hai
+      // to type bhi INSTANT
+      if (category === "INSTANT") {
+        loanType = "INSTANT";
+      }
+
+      // ------------------------------------------
+      // CREATE CATEGORY
+      // ------------------------------------------
+
+      if (!categoryMap.has(category)) {
+        categoryMap.set(category, {
+          category,
+          name:
+            category === "INSTANT"
+              ? "Instant Loan"
+              : formatCategoryName(category),
+
+          types: new Map(),
+        });
+      }
+
+      const categoryData =
+        categoryMap.get(category);
+
+      // ------------------------------------------
+      // CREATE TYPE
+      // ------------------------------------------
+
+      if (
+        !categoryData.types.has(loanType)
+      ) {
+        categoryData.types.set(
+          loanType,
+          {
+            type: loanType,
+            name:
+              loanType === "INSTANT"
+                ? "Instant"
+                : "Manual",
+            loanCount: 0,
+          }
+        );
+      }
+
+      // ------------------------------------------
+      // INCREMENT COUNT
+      // ------------------------------------------
+
+      categoryData.types.get(
+        loanType
+      ).loanCount += 1;
+    }
+
+    // ==========================================
+    // FINAL RESPONSE
+    // ==========================================
+
+    const formattedCategories =
+      Array.from(categoryMap.values()).map(
+        (category) => ({
+          category: category.category,
+
+          name: category.name,
+
+          types: Array.from(
+            category.types.values()
+          ),
+        })
+      );
+
+    return res.status(200).json({
+      success: true,
+
+      count: formattedCategories.length,
+
+      data: formattedCategories,
+    });
+
+  } catch (error) {
+    console.error(
+      "Get Loan Categories Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+export const getLoanProductsByCategory = async (req, res) => {
+  try {
+    const category = req.params.category?.trim().toUpperCase();
+
+    if (!category) {
+      return res.status(400).json({
+        success: false,
+        message: "Loan category is required",
+      });
+    }
+
+    // ==========================================
+    // FIND LOANS BY CATEGORY
+    //
+    // For INSTANT:
+    // category = INSTANT
+    // OR type = INSTANT
+    // OR processingType = INSTANT
+    // ==========================================
+
+    const query = {
+      active: true,
+
+      code: {
+        $exists: true,
+        $ne: "",
+      },
+
+      $or: [
+        {
+          category: category,
+        },
+        {
+          type: category,
+        },
+        {
+          processingType: category,
+        },
+      ],
+    };
+
+    const products = await LoanProduct.find(query)
+      .sort({
+        createdAt: -1,
+      })
+      .lean();
+
+    // ==========================================
+    // NO PRODUCTS
+    // ==========================================
+
+    if (!products.length) {
+      return res.status(404).json({
+        success: false,
+        message: `No active loan products found for ${category}`,
+        data: [],
+      });
+    }
+
+    // ==========================================
+    // FORMAT PRODUCTS
+    // ==========================================
+
+    const formattedProducts = await Promise.all(
+      products.map(async (product) => {
+        // ==========================================
+        // FETCH ASSIGNED DOCUMENTS
+        // ==========================================
+
+        const documentMappings =
+          await LoanProductDocument.find({
+            loanProduct: product._id,
+            active: true,
+          })
+            .populate(
+              "document",
+              "name code description allowedTypes maxSizeMB"
+            )
+            .sort({
+              displayOrder: 1,
+            })
+            .lean();
+
+        // ==========================================
+        // FORMAT DOCUMENTS
+        // ==========================================
+
+        const documents = documentMappings
+          .filter((item) => item.document)
+          .map((item) => ({
+            mappingId: item._id,
+
+            documentId: item.document._id,
+
+            name: item.document.name,
+
+            code: item.document.code,
+
+            description:
+              item.document.description,
+
+            allowedTypes:
+              item.document.allowedTypes,
+
+            maxSizeMB:
+              item.document.maxSizeMB,
+
+            mandatory: item.mandatory,
+
+            displayOrder:
+              item.displayOrder,
+          }));
+
+        // ==========================================
+        // DETERMINE PROCESSING TYPE
+        // ==========================================
+
+        const processingType =
+          product.processingType ||
+          (product.type === "INSTANT"
+            ? "INSTANT"
+            : "MANUAL");
+
+        // ==========================================
+        // FINAL RESPONSE
+        // ==========================================
+
+        return {
+          ...product,
+
+          category:
+            product.category || category,
+
+          categoryName:
+            product.category === "INSTANT" ||
+            product.type === "INSTANT"
+              ? "Instant Loan"
+              : formatCategoryName(
+                  product.category
+                ),
+
+          processingType,
+
+          processingTypeName:
+            processingType === "INSTANT"
+              ? "Instant"
+              : "Manual",
+
+          amount: {
+            min: product.minAmount,
+            max: product.maxAmount,
+          },
+
+          tenure: {
+            min: product.minTenure,
+            max: product.maxTenure,
+          },
+
+          interest: {
+            rate: product.interestRate,
+            type: product.interestType,
+          },
+
+          charges: {
+            processingFee:
+              product.processingFee,
+
+            processingFeeType:
+              product.processingFeeType,
+
+            gstPercentage:
+              product.gstPercentage,
+          },
+
+          documents,
+        };
+      })
+    );
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+
+      category,
+
+      categoryName:
+        category === "INSTANT"
+          ? "Instant Loan"
+          : formatCategoryName(category),
+
+      count: formattedProducts.length,
+
+      data: formattedProducts,
+    });
+
+  } catch (error) {
+    console.error(
+      "Get Loan Products By Category Error:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
