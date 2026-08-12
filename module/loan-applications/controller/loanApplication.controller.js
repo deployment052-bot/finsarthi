@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import LoanApplication from "../loanApplication.model.js";
 import LoanProduct from "../../loan-products/loanProduct.model.js";
 import LoanEMI from "../../loan-emi/loanEMI.model.js";
