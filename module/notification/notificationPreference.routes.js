@@ -15,7 +15,7 @@ const router = express.Router();
  * GET Preferences
  */
 router.get(
-  "/",
+  "/get",
   protect,
   getPreferences
 );
@@ -24,7 +24,7 @@ router.get(
  * Update Single/Multiple Preferences
  */
 router.patch(
-  "/",
+  "/enable",
   protect,
   updatePreferences
 );

@@ -3,6 +3,7 @@ import LoanApplication from "../loanApplication.model.js";
 import LoanProduct from "../../loan-products/loanProduct.model.js";
 import LoanEMI from "../../loan-emi/loanEMI.model.js";
 import Disbursement from "../../loan-disbursement/disbursement.model.js";
+import { manualLoanUpload } from "../../../middleware/manualLoanUpload.js";
 import { generateLoanStatementPDF } from "../utils/recieptPdf.js";
 import { checkEligibility } from "../../loan-products/service/eligibility.service.js";
 import { decideLoan } from "../../loan-products/service/decision.service.js";
@@ -10,7 +11,7 @@ import BankAccount from "../../bank-accounts/BankAccount.model.js";
 import { applyManualLoan } from "../service.js/manualLoan.service.js";
 import { applyInstantLoan } from "../service.js/instantLoan.service.js";
 import notificationService from "../../notification/service/notification.service.js";
-
+import { uploadBufferToCloudinary } from "../../../config/cloudanryConnection.js";
 import User from "../../User/models.js";
 import KYC from "../../kyc/kyc.model.js";
 
@@ -29,14 +30,21 @@ export const applyLoan = async (req, res) => {
     console.log("========================================");
     console.log("🔥 APPLY LOAN API HIT");
     console.log("🔥 Request Body:", req.body);
-    console.log("🔥 Amount Received:", req.body.amount);
-    console.log("🔥 Tenure Received:", req.body.tenure);
-    console.log("🔥 Product ID Received:", req.body.productId);
     console.log("========================================");
 
-    const { productId, amount, tenure, purpose } = req.body;
+    const {
+      productId,
+      amount,
+      tenure,
+      applicationData = {},
+      documents = [],
+      remarks = "",
+    } = req.body;
 
-    // Basic request validation
+    // ---------------------------------------------
+    // 1. Basic Validation
+    // ---------------------------------------------
+
     if (!productId) {
       return res.status(400).json({
         success: false,
@@ -44,19 +52,23 @@ export const applyLoan = async (req, res) => {
       });
     }
 
-    if (!amount) {
+    if (amount === undefined || amount === null) {
       return res.status(400).json({
         success: false,
         message: "Loan amount is required",
       });
     }
 
-    if (!tenure) {
+    if (tenure === undefined || tenure === null) {
       return res.status(400).json({
         success: false,
         message: "Loan tenure is required",
       });
     }
+
+    // ---------------------------------------------
+    // 2. Find Loan Product
+    // ---------------------------------------------
 
     console.log("🔍 Searching Loan Product:", productId);
 
@@ -71,6 +83,10 @@ export const applyLoan = async (req, res) => {
       });
     }
 
+    // ---------------------------------------------
+    // 3. Product Logs
+    // ---------------------------------------------
+
     console.log("========================================");
     console.log("✅ PRODUCT FOUND");
     console.log("Product ID:", product._id);
@@ -80,47 +96,51 @@ export const applyLoan = async (req, res) => {
     console.log("Processing Type:", product.processingType);
     console.log("Minimum Amount:", product.minAmount);
     console.log("Maximum Amount:", product.maxAmount);
+    console.log("Minimum Tenure:", product.minTenure);
+    console.log("Maximum Tenure:", product.maxTenure);
     console.log("Interest Rate:", product.interestRate);
     console.log("========================================");
 
-    // Snapshot prepare
-    const productSnapshot = {
-      productId: product._id,
-      code: product.code,
-      name: product.name,
-      loanType: product.loanType,
-      processingType: product.processingType,
-      segment: product.segment,
-      displayName: product.displayName,
-    };
+    // ---------------------------------------------
+    // 4. Manual Loan
+    // ---------------------------------------------
 
-    console.log("📦 Product Snapshot:", productSnapshot);
-
-    // Attach snapshot
-    product.productSnapshot = productSnapshot;
-
-    console.log("========================================");
-    console.log("💰 LOAN REQUEST DETAILS");
-    console.log("Requested Amount:", amount);
-    console.log("Requested Tenure:", tenure);
-    console.log("Purpose:", purpose);
-    console.log("Product Min Amount:", product.minAmount);
-    console.log("Product Max Amount:", product.maxAmount);
-    console.log("Processing Type:", product.processingType);
-    console.log("========================================");
-
-    // Manual Loan
     if (product.processingType === "MANUAL") {
       console.log("🟡 MANUAL LOAN FLOW STARTED");
 
-      return applyManualLoan(req, res, product);
+      const loanApplication =
+        await applyManualLoan({
+          userId: req.user._id,
+
+          product,
+
+          amount,
+
+          tenure,
+
+          applicationData,
+
+          documents,
+
+          remarks,
+        });
+
+      return res.status(201).json({
+        success: true,
+        message:
+          "Manual loan application submitted successfully",
+
+        data: loanApplication,
+      });
     }
 
-    // Instant Loan
+    // ---------------------------------------------
+    // 5. Instant Loan
+    // ---------------------------------------------
+
     console.log("🟢 INSTANT LOAN FLOW STARTED");
 
     return applyInstantLoan(req, res, product);
-
   } catch (error) {
     console.error("========================================");
     console.error("❌ APPLY LOAN ERROR");
@@ -128,9 +148,14 @@ export const applyLoan = async (req, res) => {
     console.error("Error Stack:", error.stack);
     console.error("========================================");
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message || "Failed to apply for loan",
+
+      ...(error.missingDocuments && {
+        missingDocuments: error.missingDocuments,
+      }),
     });
   }
 };
@@ -335,6 +360,76 @@ export const getLoan = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+
+
+
+export const uploadLoanDocuments = async (req, res) => {
+  try {
+    // ---------------------------------------------
+    // 1. Validate Files
+    // ---------------------------------------------
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one file is required",
+      });
+    }
+
+    // ---------------------------------------------
+    // 2. Maximum 5 Files
+    // ---------------------------------------------
+
+    if (req.files.length > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Maximum 5 files can be uploaded at once",
+      });
+    }
+
+    // ---------------------------------------------
+    // 3. Upload All Files
+    // ---------------------------------------------
+
+    const uploadedFiles = await Promise.all(
+      req.files.map(async (file) => {
+        const result = await uploadBufferToCloudinary(
+          file.buffer,
+          "finsarthi/documents"
+        );
+
+        return {
+          name: file.originalname,
+          file: result.secure_url,
+          publicId: result.public_id,
+        };
+      })
+    );
+
+    // ---------------------------------------------
+    // 4. Response
+    // ---------------------------------------------
+
+    return res.status(200).json({
+      success: true,
+      message: "Files uploaded successfully",
+      count: uploadedFiles.length,
+      data: uploadedFiles,
+    });
+  } catch (error) {
+    console.error(
+      "Upload Loan Documents Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Failed to upload files",
     });
   }
 };

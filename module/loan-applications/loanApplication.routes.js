@@ -1,12 +1,12 @@
 import express from "express";
 import { protect } from "../../middleware/authMiddleware.js";
 import { upload   } from "../../middleware/visitorupload.js";
-
+import { manualLoanUpload } from "../../middleware/manualLoanUpload.js";
 import {
   applyLoan,
   getLoan,
   getLoanById,
-  downloadLoanStatement,getLoanApplicationPrefill
+  downloadLoanStatement,getLoanApplicationPrefill,uploadLoanDocuments
 } from "./controller/loanApplication.controller.js";
 
 import {
@@ -37,7 +37,16 @@ const router = express.Router();
 // LOAN APPLICATION
 // ======================================================
 
-router.post("/apply", protect, applyLoan);
+router.post(
+  "/apply",
+  protect,
+  applyLoan
+);
+router.post(
+  "/upload-documents",
+  manualLoanUpload.array("files", 10),
+  uploadLoanDocuments
+);
 
 router.get("/my-loans", protect, getLoan);
 

@@ -457,6 +457,10 @@ export const getLoanProducts = async (req, res) => {
 
 export const getLoanCategories = async (req, res) => {
   try {
+    // ==========================================
+    // FETCH ACTIVE LOAN PRODUCTS
+    // ==========================================
+
     const products = await LoanProduct.find({
       active: true,
       code: {
@@ -465,24 +469,64 @@ export const getLoanCategories = async (req, res) => {
       },
     })
       .select(
-        "category type processingType"
+        `
+        name
+        code
+        category
+        type
+        processingType
+        description
+
+        minAmount
+        maxAmount
+
+        minTenure
+        maxTenure
+
+        interestRate
+        interestType
+
+        emiFrequency
+
+        processingFee
+        processingFeeType
+        gstPercentage
+
+        minRiskScore
+        maxActiveLoans
+
+        instantDisbursement
+        requiresPhysicalVerification
+
+        overdue
+
+        formConfiguration
+
+        active
+        createdAt
+        updatedAt
+        `
       )
+      .sort({
+        createdAt: -1,
+      })
       .lean();
 
     // ==========================================
-    // GROUP DATA MANUALLY
+    // GROUP DATA
     // ==========================================
 
     const categoryMap = new Map();
 
     for (const product of products) {
-      // ------------------------------------------
-      // CATEGORY
-      // ------------------------------------------
+      // ==========================================
+      // DETERMINE CATEGORY
+      // ==========================================
 
       let category = product.category;
 
-      // Agar category missing hai but type INSTANT hai
+      // Agar category missing hai aur loan
+      // INSTANT hai
       if (
         (!category || category === "") &&
         (
@@ -498,67 +542,91 @@ export const getLoanCategories = async (req, res) => {
         continue;
       }
 
-      // ------------------------------------------
-      // LOAN TYPE
-      // ------------------------------------------
+      category = category.toUpperCase();
+
+      // ==========================================
+      // DETERMINE LOAN TYPE
+      // ==========================================
 
       let loanType =
         product.processingType ||
         product.type ||
         "MANUAL";
 
+      loanType = loanType.toUpperCase();
+
       // Agar category INSTANT hai
-      // to type bhi INSTANT
       if (category === "INSTANT") {
         loanType = "INSTANT";
       }
 
-      // ------------------------------------------
+      // ==========================================
       // CREATE CATEGORY
-      // ------------------------------------------
+      // ==========================================
 
       if (!categoryMap.has(category)) {
         categoryMap.set(category, {
           category,
+
           name:
             category === "INSTANT"
               ? "Instant Loan"
               : formatCategoryName(category),
 
-          types: new Map(),
+          products: [],
         });
       }
 
       const categoryData =
         categoryMap.get(category);
 
-      // ------------------------------------------
-      // CREATE TYPE
-      // ------------------------------------------
+      // ==========================================
+      // ADD PRODUCT
+      // ==========================================
 
-      if (
-        !categoryData.types.has(loanType)
-      ) {
-        categoryData.types.set(
-          loanType,
-          {
-            type: loanType,
-            name:
-              loanType === "INSTANT"
-                ? "Instant"
-                : "Manual",
-            loanCount: 0,
-          }
-        );
-      }
+      categoryData.products.push({
+        ...product,
 
-      // ------------------------------------------
-      // INCREMENT COUNT
-      // ------------------------------------------
+        category,
 
-      categoryData.types.get(
-        loanType
-      ).loanCount += 1;
+        categoryName:
+          category === "INSTANT"
+            ? "Instant Loan"
+            : formatCategoryName(category),
+
+        processingType: loanType,
+
+        processingTypeName:
+          loanType === "INSTANT"
+            ? "Instant"
+            : "Manual",
+
+        amount: {
+          min: product.minAmount,
+          max: product.maxAmount,
+        },
+
+        tenure: {
+          min: product.minTenure,
+          max: product.maxTenure,
+        },
+
+        interest: {
+          rate: product.interestRate,
+          type: product.interestType,
+        },
+
+        charges: {
+          processingFee:
+            product.processingFee,
+
+          processingFeeType:
+            product.processingFeeType,
+
+          gstPercentage:
+            product.gstPercentage,
+        },
+      });
     }
 
     // ==========================================
@@ -567,21 +635,90 @@ export const getLoanCategories = async (req, res) => {
 
     const formattedCategories =
       Array.from(categoryMap.values()).map(
-        (category) => ({
-          category: category.category,
+        (categoryData) => {
 
-          name: category.name,
+          const products =
+            categoryData.products;
 
-          types: Array.from(
-            category.types.values()
-          ),
-        })
+          // ======================================
+          // ONLY ONE LOAN PRODUCT
+          // ======================================
+
+          if (products.length === 1) {
+            const product = products[0];
+
+            return {
+              category:
+                categoryData.category,
+
+              name:
+                categoryData.name,
+
+              loanCount: 1,
+
+              type: {
+                type:
+                  product.processingType,
+
+                name:
+                  product.processingTypeName,
+              },
+
+              // Complete loan details
+              loan: product,
+            };
+          }
+
+          // ======================================
+          // MULTIPLE LOAN PRODUCTS
+          // ======================================
+
+          const typeMap = new Map();
+
+          for (const product of products) {
+            const type =
+              product.processingType;
+
+            if (!typeMap.has(type)) {
+              typeMap.set(type, {
+                type,
+
+                name:
+                  type === "INSTANT"
+                    ? "Instant"
+                    : "Manual",
+
+                loanCount: 0,
+              });
+            }
+
+            typeMap.get(type).loanCount += 1;
+          }
+
+          return {
+            category:
+              categoryData.category,
+
+            name:
+              categoryData.name,
+
+            types:
+              Array.from(
+                typeMap.values()
+              ),
+          };
+        }
       );
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
 
     return res.status(200).json({
       success: true,
 
-      count: formattedCategories.length,
+      count:
+        formattedCategories.length,
 
       data: formattedCategories,
     });
