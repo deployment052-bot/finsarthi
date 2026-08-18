@@ -105,11 +105,29 @@ export const assignDocumentsToLoanProduct = async (req, res) => {
       });
     }
 
-    // Validate document ids
-    const documentIds = documents.map((d) => d.documentId);
+    // Get document IDs
+    const documentIds = documents.map(
+      (d) => d.documentId
+    );
 
+    // Duplicate check
+    const uniqueDocumentIds = [
+      ...new Set(
+        documentIds.map((id) => id.toString())
+      ),
+    ];
+
+    if (uniqueDocumentIds.length !== documentIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate documents are not allowed",
+      });
+    }
+
+    // Validate documents
     const existingDocs = await DocumentMaster.find({
       _id: { $in: documentIds },
+      active: true,
     });
 
     if (existingDocs.length !== documentIds.length) {
@@ -119,24 +137,64 @@ export const assignDocumentsToLoanProduct = async (req, res) => {
       });
     }
 
-    // Delete old mappings
-    await LoanProductDocument.deleteMany({
-      loanProduct: id,
-    });
+    // Check already assigned documents
+    const existingMappings =
+      await LoanProductDocument.find({
+        loanProduct: id,
+        document: { $in: documentIds },
+      });
 
-    // Create new mappings
-    const mappings = documents.map((doc, index) => ({
+    const alreadyAssigned = new Set(
+      existingMappings.map((mapping) =>
+        mapping.document.toString()
+      )
+    );
+
+    // Only create NEW mappings
+    const newDocuments = documents.filter(
+      (doc) =>
+        !alreadyAssigned.has(
+          doc.documentId.toString()
+        )
+    );
+
+    if (newDocuments.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: "All documents are already assigned",
+      });
+    }
+
+    // Get last display order
+    const lastMapping =
+      await LoanProductDocument.findOne({
+        loanProduct: id,
+      }).sort({
+        displayOrder: -1,
+      });
+
+    let nextDisplayOrder =
+      lastMapping?.displayOrder || 0;
+
+    // Create only new mappings
+    const mappings = newDocuments.map((doc) => ({
       loanProduct: id,
       document: doc.documentId,
       mandatory: doc.mandatory ?? true,
-      displayOrder: doc.displayOrder ?? index + 1,
+      displayOrder:
+        doc.displayOrder ??
+        ++nextDisplayOrder,
+      active: true,
     }));
 
-    await LoanProductDocument.insertMany(mappings);
+    await LoanProductDocument.insertMany(
+      mappings
+    );
 
     return res.status(200).json({
       success: true,
       message: "Documents assigned successfully",
+      data: mappings,
     });
   } catch (error) {
     return res.status(500).json({
@@ -468,8 +526,7 @@ export const getLoanCategories = async (req, res) => {
         $ne: "",
       },
     })
-      .select(
-        `
+      .select(`
         name
         code
         category
@@ -505,12 +562,65 @@ export const getLoanCategories = async (req, res) => {
         active
         createdAt
         updatedAt
-        `
-      )
+      `)
       .sort({
         createdAt: -1,
       })
       .lean();
+
+    // ==========================================
+    // FETCH DOCUMENTS FOR EACH PRODUCT
+    // ==========================================
+
+    const productsWithDocuments = await Promise.all(
+      products.map(async (product) => {
+        const documentMappings =
+          await LoanProductDocument.find({
+            loanProduct: product._id,
+            active: true,
+          })
+            .populate(
+              "document",
+              "name code description allowedTypes maxSizeMB"
+            )
+            .sort({
+              displayOrder: 1,
+            })
+            .lean();
+
+        const documents = documentMappings
+          .filter((item) => item.document)
+          .map((item) => ({
+            mappingId: item._id,
+
+            documentId: item.document._id,
+
+            name: item.document.name,
+
+            code: item.document.code,
+
+            description:
+              item.document.description,
+
+            allowedTypes:
+              item.document.allowedTypes,
+
+            maxSizeMB:
+              item.document.maxSizeMB,
+
+            mandatory:
+              item.mandatory,
+
+            displayOrder:
+              item.displayOrder,
+          }));
+
+        return {
+          ...product,
+          documents,
+        };
+      })
+    );
 
     // ==========================================
     // GROUP DATA
@@ -518,7 +628,7 @@ export const getLoanCategories = async (req, res) => {
 
     const categoryMap = new Map();
 
-    for (const product of products) {
+    for (const product of productsWithDocuments) {
       // ==========================================
       // DETERMINE CATEGORY
       // ==========================================
@@ -626,6 +736,9 @@ export const getLoanCategories = async (req, res) => {
           gstPercentage:
             product.gstPercentage,
         },
+
+        // Documents already fetched above
+        documents: product.documents || [],
       });
     }
 
