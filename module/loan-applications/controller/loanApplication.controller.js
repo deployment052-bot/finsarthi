@@ -554,7 +554,7 @@ export const getLoanById = async (req, res) => {
 
     const repaymentSchedule = emis.map((emi) => ({
       emiId: emi.emiId,
-
+emiObjectId: emi._id,
       installmentNumber: emi.installmentNumber,
 
       dueDate: emi.dueDate,

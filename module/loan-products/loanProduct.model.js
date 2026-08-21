@@ -38,6 +38,7 @@ const loanProductSchema = new mongoose.Schema(
         "VEHICLE",
         "RENOVATION",
         "AGRICULTURE",
+        "PROPERTY",
         "OTHER",
       ],
       default: "PERSONAL",
