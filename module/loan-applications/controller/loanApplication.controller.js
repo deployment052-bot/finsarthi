@@ -14,7 +14,7 @@ import notificationService from "../../notification/service/notification.service
 import { uploadBufferToCloudinary } from "../../../config/cloudanryConnection.js";
 import User from "../../User/models.js";
 import KYC from "../../kyc/kyc.model.js";
-
+import Payment from "../../payment/payment.model.js";
 
 
 import {uploadToCloudinary} 
@@ -489,28 +489,44 @@ export const getLoanById = async (req, res) => {
       .lean();
 
     // ==========================================
-    // 5. FEE CALCULATION
+    // 4.1 GET PAYMENTS
     // ==========================================
 
-    /*
-      IMPORTANT:
+    const payments = await Payment.find({
+      loan: loan._id,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+      
 
-      Replace these fields according to your
-      LoanProduct schema.
+    // ==========================================
+    // 4.2 GROUP PAYMENTS BY EMI
+    // ==========================================
 
-      Example:
-      product.processingFee
-      product.processingFeePercentage
+    const paymentsByEmi = {};
 
-      Currently we are supporting both:
-      - fixed processing fee
-      - percentage based processing fee
-    */
+    payments.forEach((payment) => {
+      if (!payment.emi) return;
+
+      const emiId = payment.emi.toString();
+
+      if (!paymentsByEmi[emiId]) {
+        paymentsByEmi[emiId] = [];
+      }
+
+      paymentsByEmi[emiId].push(payment);
+    });
+
+    // ==========================================
+    // 5. FEE CALCULATION
+    // ==========================================
 
     let processingFee = 0;
 
     if (loan.product?.processingFee) {
-      processingFee = Number(loan.product.processingFee);
+      processingFee = Number(
+        loan.product.processingFee
+      );
     }
 
     if (
@@ -518,8 +534,14 @@ export const getLoanById = async (req, res) => {
       !loan.product?.processingFee
     ) {
       processingFee =
-        (Number(loan.approvedAmount || loan.amount || 0) *
-          Number(loan.product.processingFeePercentage)) /
+        (Number(
+          loan.approvedAmount ||
+            loan.amount ||
+            0
+        ) *
+          Number(
+            loan.product.processingFeePercentage
+          )) /
         100;
     }
 
@@ -533,8 +555,11 @@ export const getLoanById = async (req, res) => {
     // 7. LOAN AMOUNT
     // ==========================================
 
-    const loanAmount =
-      Number(loan.approvedAmount || loan.amount || 0);
+    const loanAmount = Number(
+      loan.approvedAmount ||
+        loan.amount ||
+        0
+    );
 
     // ==========================================
     // 8. DISBURSAL AMOUNT
@@ -552,32 +577,71 @@ export const getLoanById = async (req, res) => {
     // 9. EMI SCHEDULE
     // ==========================================
 
-    const repaymentSchedule = emis.map((emi) => ({
-      emiId: emi.emiId,
-emiObjectId: emi._id,
-      installmentNumber: emi.installmentNumber,
+ // ==========================================
+// 9. EMI SCHEDULE
+// ==========================================
 
-      dueDate: emi.dueDate,
+const repaymentSchedule = emis.map((emi) => {
+  const emiPayments =
+    paymentsByEmi[emi._id.toString()] || [];
 
-      emiAmount: emi.emiAmount,
+  // Latest payment for this EMI
+  const latestPayment =
+    emiPayments.length > 0
+      ? emiPayments[0]
+      : null;
 
-      principalAmount: emi.principalAmount,
+  // Latest successful payment
+  const successfulPayment = emiPayments.find(
+    (payment) => payment.status === "SUCCESS"
+  );
 
-      interestAmount: emi.interestAmount,
+  return {
+    emiId: emi.emiId,
 
-      penaltyAmount: emi.penaltyAmount,
+    emiObjectId: emi._id,
 
-      totalDueAmount:
-        emi.totalDueAmount ??
-        Number(emi.emiAmount || 0) +
-          Number(emi.penaltyAmount || 0),
+    installmentNumber:
+      emi.installmentNumber,
 
-      overdueDays: emi.overdueDays,
+    dueDate: emi.dueDate,
 
-      status: emi.status,
+    emiAmount: emi.emiAmount,
 
-      isClosed: emi.isClosed,
-    }));
+    principalAmount:
+      emi.principalAmount,
+
+    interestAmount:
+      emi.interestAmount,
+
+    penaltyAmount:
+      emi.penaltyAmount,
+
+    totalDueAmount:
+      emi.totalDueAmount ??
+      Number(emi.emiAmount || 0) +
+        Number(emi.penaltyAmount || 0),
+
+    overdueDays:
+      emi.overdueDays,
+
+    // EMI Status
+    status: emi.status,
+
+    isClosed:
+      emi.isClosed,
+
+    // Payment Status
+    paymentStatus: latestPayment
+      ? latestPayment.status
+      : "NOT_PAID",
+
+    // Successful Payment Date
+    paymentDate: successfulPayment
+      ? successfulPayment.createdAt
+      : null,
+  };
+});
 
     // ==========================================
     // 10. RESPONSE
@@ -594,11 +658,14 @@ emiObjectId: emi._id,
         loanDetails: {
           loanId: loan._id,
 
-          applicationId: loan.applicationId,
+          applicationId:
+            loan.applicationId,
 
-          loanNumber: loan.loanNumber,
+          loanNumber:
+            loan.loanNumber,
 
-          productName: loan.product?.name || null,
+          productName:
+            loan.product?.name || null,
 
           loanRefNo:
             loan.loanNumber ||
@@ -617,15 +684,18 @@ emiObjectId: emi._id,
             loan.outstandingAmount || 0
           ),
 
-          interestRate: loan.interestRate,
+          interestRate:
+            loan.interestRate,
 
-          tenure: loan.tenure,
+          tenure:
+            loan.tenure,
 
           emiAmount: Number(
             loan.emiAmount || 0
           ),
 
-          status: loan.status,
+          status:
+            loan.status,
         },
 
         // ======================================
@@ -650,30 +720,36 @@ emiObjectId: emi._id,
           ? {
               accountHolderName:
                 disbursement.bankDetails
-                  ?.accountHolderName || null,
+                  ?.accountHolderName ||
+                null,
 
               accountNumber:
                 disbursement.bankDetails
-                  ?.accountNumber || null,
-
-              ifsc:
-                disbursement.bankDetails?.ifsc ||
+                  ?.accountNumber ||
                 null,
 
+              ifsc:
+                disbursement.bankDetails
+                  ?.ifsc || null,
+
               utrNumber:
-                disbursement.utrNumber || null,
+                disbursement.utrNumber ||
+                null,
 
               transferredAmount:
                 disbursement.amount || 0,
 
               transferMethod:
-                disbursement.method || null,
+                disbursement.method ||
+                null,
 
               transferStatus:
-                disbursement.status || null,
+                disbursement.status ||
+                null,
 
               transferredAt:
-                disbursement.processedAt || null,
+                disbursement.processedAt ||
+                null,
             }
           : null,
 
